@@ -11,9 +11,7 @@ on:
         type: choice
         options: [ambos, imagem, video]
         default: ambos
-  push:
-    branches: [main]
-    paths: ["patches/**", ".github/workflows/build.yml", "versoes.env"]
+  # Só manual: build lento roda quando o dono mandar.
 
 permissions:
   contents: write
@@ -24,7 +22,7 @@ concurrency:
 
 jobs:
   imagem:
-    if: github.event_name == 'push' || inputs.app == 'ambos' || inputs.app == 'imagem'
+    if: inputs.app == 'ambos' || inputs.app == 'imagem'
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -75,7 +73,7 @@ jobs:
   video:
     needs: [imagem]
     # Roda depois do de imagem (sem disputar o push); always() para rodar mesmo se o outro for pulado ou falhar.
-    if: always() && (github.event_name == 'push' || inputs.app == 'ambos' || inputs.app == 'video')
+    if: always() && (inputs.app == 'ambos' || inputs.app == 'video')
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
