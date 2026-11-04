@@ -7,3 +7,10 @@ AddOutputFilterByType DEFLATE application/wasm text/javascript text/html
 # Código-fonte e configuração não são públicos.
 RedirectMatch 404 ^/(conector|patches|\.github)(/|$)
 RedirectMatch 404 ^/versoes\.env$
+
+# A hospedagem põe "Content-Security-Policy: upgrade-insecure-requests", que troca o
+# http://127.0.0.1 do Arcano Conector por https e o painel nunca acha o conector.
+<IfModule mod_headers.c>
+Header always unset Content-Security-Policy
+Header unset Content-Security-Policy
+</IfModule>
