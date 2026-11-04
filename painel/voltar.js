@@ -1,10 +1,10 @@
 /*
- * Botão "Voltar ao ArcanoApp" nos dois editores (vídeo e imagem). Fica FORA do build.
+ * Botão "Voltar ao início" (tela de escolher imagem ou vídeo) nos dois editores. Fica FORA do build.
  * Dentro do ArcanoApp (iframe), volta a página de cima; aberto direto, volta nesta aba.
  */
 (function () {
   'use strict';
-  var DESTINO = 'https://arcanoapp.voxvisual.com.br/arcano-layers';
+  var DESTINO = 'https://layers.voxvisual.com.br/';
   function voltar() {
     try { if (window.top !== window) { window.top.location.href = DESTINO; return; } } catch (e) { /* outra origem: segue */ }
     location.href = DESTINO;
@@ -22,7 +22,7 @@
   var b = document.createElement('button');
   b.id = 'arcano-voltar';
   b.type = 'button';
-  b.title = 'Voltar ao ArcanoApp (escolher editar imagem ou vídeo)';
+  b.title = 'Voltar ao início (escolher editar imagem ou vídeo)';
   b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>';
   b.onclick = voltar;
   function montar() { document.body.appendChild(b); }
