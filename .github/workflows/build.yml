@@ -68,7 +68,7 @@ jobs:
           git add -A imagem
           git diff --cached --quiet && exit 0
           git commit -m "Build editor de imagem (${PHOTOCRAFT_REF})"
-          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
 
   video:
     needs: [imagem]
@@ -121,4 +121,4 @@ jobs:
           git add -A video
           git diff --cached --quiet && exit 0
           git commit -m "Build editor de vídeo (${EFFECTCRAFT_REF})"
-          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }

@@ -140,6 +140,18 @@ def effectcraft(r):
           "    let links: [(Icon, &str, &str); 0] = [];\n    let sib: &[(&str, &str)] = &[];")
     troca(r, "crates/ui-egui/src/panels/home.rs", 'tr("More ArtCraft apps")', '""')
     troca(r, "crates/ui-egui/src/panels/home.rs", 'tr("Community")', '""')
+    # Textos com o nome deles que aparecem na tela.
+    troca(r, "crates/ui-egui/src/panels/home.rs", 'tr("Welcome to EffectCraft")', f'"Boas-vindas ao {NOME}"')
+    troca(r, "crates/ui-egui/src/panels/home.rs", 'tr("EffectCraft project")', f'"Projeto {NOME}"')
+    troca(r, "crates/ui-egui/src/panels/home.rs", '"EffectCraft project"', f'"Projeto {NOME}"', todas=True)
+    troca(r, "crates/ui-egui/src/header.rs", 'tr("About EffectCraft")', f'"Sobre o {NOME}"')
+    troca(r, "crates/ui-egui/src/header.rs", '"About EffectCraft"', f'"Sobre o {NOME}"', todas=True)
+    troca(r, "crates/ui-egui/src/panels/dialogs.rs", '"About EffectCraft"', f'"Sobre o {NOME}"', todas=True)
+    troca(r, "crates/ui-egui/src/panels/learn.rs",
+          'crate::i18n::tr("Hands-on tutorials that run inside EffectCraft. Do each step yourself, or press Show me.")',
+          '"Tutoriais práticos que rodam dentro do editor. Faça cada passo ou toque em Mostrar."')
+    troca(r, "crates/ui-egui/src/panels/settings.rs",
+          'tr("EffectCraft didn\'t quit normally last time.")', '"O editor não foi fechado normalmente da última vez."')
     # Sobre: nome Arcano Layers, mantendo o crédito do projeto original.
     troca(r, "crates/ui-egui/src/panels/dialogs.rs",
           'Align2::LEFT_CENTER, "EffectCraft", Tokens::semibold(24.0)',
