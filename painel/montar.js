@@ -5,6 +5,26 @@
  */
 (function () {
   'use strict';
+
+  /*
+   * ⚠️ ANTES DO EDITOR ABRIR (este script roda antes do módulo dele, que lê a URL):
+   * - nogpuworkers: um motor de GPU só. Com vários (um por trabalhador de render) o processo de GPU
+   *   do Chrome caía ("GPU device lost… external Instance") e o Chrome bloqueava a GPU do site até
+   *   reiniciar. Os trabalhadores passam a renderizar no processador.
+   * - nosw: sem service worker. Ele guardava a versão velha do editor no navegador do cliente.
+   * Quem quiser o comportamento original: ?gpuworkers na URL.
+   */
+  try {
+    var u = new URL(location.href), mudou = false;
+    if (!u.searchParams.has('gpuworkers') && !u.searchParams.has('nogpuworkers')) { u.searchParams.set('nogpuworkers', ''); mudou = true; }
+    if (!u.searchParams.has('nosw')) { u.searchParams.set('nosw', ''); mudou = true; }
+    if (mudou) { history.replaceState(history.state, '', u.pathname + '?' + u.searchParams.toString().replace(/=(&|$)/g, '$1') + u.hash); }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); });
+      if (window.caches && caches.keys) { caches.keys().then(function (ks) { ks.forEach(function (k) { if (/^effectcraft/.test(k)) { caches.delete(k); } }); }); }
+    }
+  } catch (e) { /* segue normal */ }
+
   var LARGURA = 380, CHAVE = 'arcano-painel-aberto';
   var aberto = true;
   try { aberto = localStorage.getItem(CHAVE) !== '0'; } catch (e) { /* sem storage */ }
