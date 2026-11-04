@@ -62,6 +62,11 @@ def photocraft(r):
                           f'<title>{NOME} · Imagem</title>\n  <link rel="icon" href="arcano.svg" type="image/svg+xml">')
             p.write_text(t, encoding="utf-8")
             print(f"ok  {f}")
+    # Gancho do Arcano (trava de login, painel do Photoshop): mora em /painel, fora do build,
+    # então muda sem recompilar o editor.
+    troca(r, "apps/photocraft-web-boot/index.html",
+          '<canvas id="photocraft_canvas"></canvas>',
+          '<canvas id="photocraft_canvas"></canvas>\n  <script src="../painel/montar-imagem.js"></script>')
     # Tela de carregamento (a que aparece antes do editor abrir).
     troca(r, "apps/photocraft-web-boot/index.html", "<p>Loading PhotoCraft&hellip;</p>", f"<p>Carregando {NOME}&hellip;</p>")
     troca(r, "apps/photocraft-web-boot/index.html",
