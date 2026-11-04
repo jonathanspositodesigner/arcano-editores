@@ -45,7 +45,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src, key: imagem-${{ env.PHOTOCRAFT_REF }} }
+        with:
+          workspaces: src
+          key: imagem-${{ env.PHOTOCRAFT_REF }}
       - name: Trunk
         run: curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.cargo/bin" trunk
       - name: Patches Arcano
@@ -91,7 +93,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
-        with: { workspaces: src, key: video-${{ env.EFFECTCRAFT_REF }} }
+        with:
+          workspaces: src
+          key: video-${{ env.EFFECTCRAFT_REF }}
       - name: wasm-bindgen
         run: |
           V=$(sed -n 's/^const WASM_BINDGEN: &str = "\(.*\)";$/\1/p' src/xtask/src/main.rs)
