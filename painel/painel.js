@@ -194,8 +194,10 @@
     '<div class="balao-bt"><span class="bt-falso">Bloquear</span><span class="bt-falso sim alvo">Permitir</span></div></div></div>';
   var DESENHO_DESBLOQUEAR =
     '<div class="tela-chrome"><div class="barra"><span class="icone-site alvo">⚙</span><span class="url">layers.voxvisual.com.br</span></div>' +
-    '<div class="balao"><span class="linha-menu alvo2">Configurações do site</span>' +
-    '<span class="linha-menu">Acesso à rede local <i class="chave">Permitir ▾</i></span></div></div>';
+    '<div class="balao"><b>layers.voxvisual.com.br</b>' +
+    '<span class="linha-menu">🔒 A ligação é segura</span>' +
+    '<span class="linha-menu">Pop-ups e redirecionamentos <i class="interruptor ligado"></i></span>' +
+    '<span class="linha-menu alvo2">🖥 Apps no dispositivo <i class="interruptor"></i></span></div></div>';
 
   function telaConector() {
     var e = etapa();
@@ -238,8 +240,7 @@
           DESENHO_DESBLOQUEAR +
           '<ol class="tuto">' +
           '<li>Clique no ícone <b>à esquerda do endereço</b> do site, lá em cima (o desenho mostra onde).</li>' +
-          '<li>Clique em <b>Configurações do site</b>.</li>' +
-          '<li>Ache <b>Acesso à rede local</b> (em algumas versões: <b>Apps e serviços neste dispositivo</b>) e escolha <b>Permitir</b>.</li>' +
+          '<li>Na janelinha que abre, <b>ligue a chave “Apps no dispositivo”</b> (fica azul/verde).</li>' +
           '<li>Volte aqui e clique em <b>Recarregar</b>.</li>' +
           '</ol>' +
           '<div class="botoes"><button class="pri" id="b-recarregar">Recarregar</button><button class="sec" id="b-voltar-inst">Ainda não instalei</button></div>', 'conector:liberar:bloqueado');
@@ -250,6 +251,7 @@
           '<p>Clique em <b>Conectar</b>. O Chrome vai mostrar um aviso lá em cima, perto do endereço do site: clique em <b>Permitir</b>.</p>' +
           DESENHO_PERGUNTA +
           '<div class="botoes"><button class="pri" id="b-conectar">Conectar</button><button class="sec" id="b-voltar-inst">Ainda não instalei</button></div>' +
+          '<p class="nota">Não apareceu aviso? Clique no ícone à esquerda do endereço do site e <b>ligue a chave “Apps no dispositivo”</b>. Depois clique em Conectar de novo.</p>' +
           '<p class="nota" id="conectando"></p>', 'conector:liberar');
         $('#b-conectar').onclick = function () {
           // O pedido sai do clique: é isso que faz o Chrome mostrar o aviso de permissão.

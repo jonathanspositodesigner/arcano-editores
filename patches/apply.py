@@ -205,6 +205,87 @@ def effectcraft(r):
     troca(r, "apps/effectcraft-web/web/manifest.webmanifest",
           '"short_name": "EffectCraft"', '"short_name": "Arcano Vídeo"')
 
+    # ── Travamento do Chrome (RESULT_CODE_HUNG / "placa de vídeo parou") ──
+    # Causa: ao abrir, o editor compilava de uma vez os 237 programas de GPU (todos os efeitos,
+    # um shader de 514 KB). No Chrome cada um vira compilação HLSL no processo da GPU; somados,
+    # passam do tempo do vigia do Chrome, que mata a GPU. No navegador agora só os 15 do
+    # compositor compilam ao abrir; cada efeito compila na primeira vez que é usado.
+    ctx = "crates/gpu/src/context.rs"
+    troca(r, ctx, "/// Compute entry points in `kernels.wgsl` (one pipeline each).",
+          "/// No navegador os kernels de efeito compilam na primeira vez que são usados (Arcano Layers):\n"
+          "/// compilar os 237 ao abrir travava o processo da GPU do Chrome.\n"
+          "const LAZY: bool = cfg!(target_arch = \"wasm32\");\n\n"
+          "/// Compute entry points in `kernels.wgsl` (one pipeline each).")
+    troca(r, ctx, "    pipelines: HashMap<&'static str, wgpu::ComputePipeline>,\n",
+          "    pipelines: HashMap<&'static str, wgpu::ComputePipeline>,\n"
+          "    /// Kernels de efeito já compilados sob demanda (só no navegador, ver `LAZY`).\n"
+          "    lazy: Mutex<HashMap<&'static str, wgpu::ComputePipeline>>,\n"
+          "    kmodule: wgpu::ShaderModule,\n"
+          "    klayout: wgpu::PipelineLayout,\n"
+          "    klayout_ext: wgpu::PipelineLayout,\n")
+    troca(r, ctx, "        let mut unavailable = vec![];\n        for e in EXT_ENTRIES {\n",
+          "        let mut unavailable = vec![];\n        if !LAZY {\n        for e in EXT_ENTRIES {\n")
+    troca(r, ctx,
+          "                    log::warn!(\"gpu {name}: kernel {e} unavailable, its effects render on the CPU: {why}\");\n"
+          "                    unavailable.push((*e, why));\n                }\n            }\n        }\n        let dmodule",
+          "                    log::warn!(\"gpu {name}: kernel {e} unavailable, its effects render on the CPU: {why}\");\n"
+          "                    unavailable.push((*e, why));\n                }\n            }\n        }\n        }\n        let dmodule")
+    troca(r, ctx, "            pipelines,\n            unavailable,\n            display_bgl,\n",
+          "            pipelines,\n            lazy: Mutex::new(HashMap::new()),\n            kmodule: module.clone(),\n            klayout: layout.clone(),\n            klayout_ext: layout_ext.clone(),\n            unavailable,\n            display_bgl,\n")
+    troca(r, ctx, "            pipelines,\n            unavailable,\n            display_bgl: self.display_bgl.clone(),\n",
+          "            pipelines,\n            lazy: Mutex::new(HashMap::new()),\n            kmodule: self.kmodule.clone(),\n            klayout: self.klayout.clone(),\n            klayout_ext: self.klayout_ext.clone(),\n            unavailable,\n            display_bgl: self.display_bgl.clone(),\n")
+    troca(r, ctx, "    pub(crate) fn has_kernel(&self, entry: &str) -> bool {\n        self.pipelines.contains_key(entry)\n    }\n",
+          "    pub(crate) fn has_kernel(&self, entry: &str) -> bool {\n        self.pipelines.contains_key(entry) || (LAZY && lazy_name(entry).is_some())\n    }\n\n"
+          "    /// O pipeline do kernel `entry`: já compilado, ou (no navegador) compilado agora, uma vez.\n"
+          "    pub(crate) fn kernel(&self, entry: &str) -> Option<wgpu::ComputePipeline> {\n"
+          "        if let Some(p) = self.pipelines.get(entry) {\n            return Some(p.clone());\n        }\n"
+          "        if !LAZY {\n            return None;\n        }\n"
+          "        let nome = lazy_name(entry)?;\n"
+          "        let mut m = self.lazy.lock().unwrap_or_else(|e| e.into_inner());\n"
+          "        if let Some(p) = m.get(nome) {\n            return Some(p.clone());\n        }\n"
+          "        let layout = if EXT_ENTRIES.contains(&nome) { &self.klayout_ext } else { &self.klayout };\n"
+          "        let p = self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {\n"
+          "            label: Some(nome),\n            layout: Some(layout),\n            module: &self.kmodule,\n"
+          "            entry_point: Some(nome),\n            compilation_options: Default::default(),\n            cache: None,\n        });\n"
+          "        m.insert(nome, p.clone());\n        Some(p)\n    }\n")
+    troca(r, ctx, "        let Some(pipe) = g.pipelines.get(entry) else {",
+          "        let kernel = g.kernel(entry);\n        let Some(pipe) = kernel.as_ref() else {")
+    # Lista dos kernels que compilam sob demanda (os mesmos que o original compilava ao abrir).
+    p = pathlib.Path(r) / ctx
+    t = p.read_text(encoding="utf-8")
+    t += """
+
+/// O nome estático de um kernel que compila sob demanda (efeitos e Classic 3D), se `entry` for um.
+fn lazy_name(entry: &str) -> Option<&'static str> {
+    EXT_ENTRIES
+        .iter()
+        .chain(EFFECT_ENTRIES)
+        .chain(crate::fx_color::KERNELS)
+        .chain(crate::fx_distort::KERNELS)
+        .chain(crate::fx_generate::KERNELS)
+        .chain(crate::fx_key::KERNELS)
+        .chain(crate::fx_stylize::KERNELS)
+        .chain(crate::fx_noise::KERNELS)
+        .chain(crate::fx_tone::KERNELS)
+        .chain(crate::fx_warp::KERNELS)
+        .chain(crate::fx_extra::KERNELS)
+        .chain(crate::fx_depth::KERNELS)
+        .chain(crate::fx_lut::KERNELS)
+        .chain(crate::fx_sim::KERNELS)
+        .chain(crate::fx_particles::KERNELS)
+        .chain(crate::fx_vr::KERNELS)
+        .chain(crate::fx_light::KERNELS)
+        .chain(crate::fx_transition::KERNELS)
+        .chain(crate::fx_text::KERNELS)
+        .chain(crate::fx_time::KERNELS)
+        .chain(crate::fx_pixel2::KERNELS)
+        .chain(crate::fx_gen2::KERNELS)
+        .find(|e| **e == entry)
+        .copied()
+}
+"""
+    p.write_text(t, encoding="utf-8")
+    print(f"ok  {ctx}  (kernels sob demanda)")
     # ── Sem nada do ArtCraft/EffectCraft (pedido do dono, 04/11/2026) ──
     # Links: grupo do WhatsApp (o da página de isca) e voltar ao ArcanoApp.
     troca(r, "crates/engine/src/home/links.rs", 'pub const DISCORD: &str = "https://discord.gg/artcraft";', f'pub const DISCORD: &str = "{GRUPO}";')
