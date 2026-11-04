@@ -1,0 +1,117 @@
+# Compila os editores do Arcano Layers a partir do código original + patches/apply.py
+# e publica o resultado nas pastas imagem/ e video/ deste repositório (a Hostinger
+# implanta sozinha a cada push na main).
+name: Build editores
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Qual editor compilar"
+        type: choice
+        options: [ambos, imagem, video]
+        default: ambos
+  push:
+    branches: [main]
+    paths: ["patches/**", ".github/workflows/build.yml", "versoes.env"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-editores
+  cancel-in-progress: false
+
+jobs:
+  imagem:
+    if: github.event_name == 'push' || inputs.app == 'ambos' || inputs.app == 'imagem'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      TRUNK_VERSION: 0.21.14
+      # Menos memória que o LTO "fat" do original (os runners de repositório privado são menores).
+      CARGO_PROFILE_WASM_RELEASE_LTO: thin
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: site }
+      - name: Versão
+        run: cat site/versoes.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: storytold/photocraft
+          ref: ${{ env.PHOTOCRAFT_REF }}
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src, key: imagem-${{ env.PHOTOCRAFT_REF }} }
+      - name: Trunk
+        run: curl -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar -xz -C "$HOME/.cargo/bin" trunk
+      - name: Patches Arcano
+        run: python3 site/patches/apply.py photocraft src
+      - name: Compilar
+        run: cd src && packaging/web/package.sh
+      - name: Copiar para imagem/
+        run: |
+          OUT=$(ls -d src/target/web-package/photocraft-web-*/ | head -1)
+          rm -rf site/imagem && cp -R "$OUT" site/imagem
+          # O pacote oficial procura os snippets em app/ (bug deles na 0.19.0).
+          [ -d site/imagem/snippets ] && cp -R site/imagem/snippets site/imagem/app/ || true
+          du -sh site/imagem
+      - name: Publicar
+        run: |
+          cd site
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          git add -A imagem
+          git diff --cached --quiet && exit 0
+          git commit -m "Build editor de imagem (${PHOTOCRAFT_REF})"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done
+
+  video:
+    needs: [imagem]
+    # Roda depois do de imagem (sem disputar o push); always() para rodar mesmo se o outro for pulado ou falhar.
+    if: always() && (github.event_name == 'push' || inputs.app == 'ambos' || inputs.app == 'video')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_RELEASE_LTO: thin
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: site }
+      - name: Versão
+        run: cat site/versoes.env >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: storytold/effectcraft
+          ref: ${{ env.EFFECTCRAFT_REF }}
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: wasm32-unknown-unknown }
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src, key: video-${{ env.EFFECTCRAFT_REF }} }
+      - name: wasm-bindgen
+        run: |
+          V=$(sed -n 's/^const WASM_BINDGEN: &str = "\(.*\)";$/\1/p' src/xtask/src/main.rs)
+          cargo install wasm-bindgen-cli --version "$V" --locked
+      - name: Patches Arcano
+        run: python3 site/patches/apply.py effectcraft src
+      - name: Compilar
+        run: cd src && CI=1 packaging/web/package.sh
+      - name: Copiar para video/
+        run: |
+          OUT=$(ls -d src/target/web-package/effectcraft-web-*/ | head -1)
+          rm -rf site/video && cp -R "$OUT" site/video
+          echo '{"startup":"empty"}' > site/video/effectcraft-config.json
+          du -sh site/video
+      - name: Publicar
+        run: |
+          cd site
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          git add -A video
+          git diff --cached --quiet && exit 0
+          git commit -m "Build editor de vídeo (${EFFECTCRAFT_REF})"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done
