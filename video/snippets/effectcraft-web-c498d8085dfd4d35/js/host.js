@@ -1,4 +1,4 @@
-// Browser services for the EffectCraft web app (imported by the wasm module through
+// Browser services for the Arcano Layers web app (imported by the wasm module through
 // wasm-bindgen; see src/persist.rs, src/audio.rs and src/worker.rs):
 //
 // - storage: the Origin Private File System, or IndexedDB where OPFS can't write;

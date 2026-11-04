@@ -1,11 +1,11 @@
-// EffectCraft service worker: the app works offline once loaded, and installs as an app.
+// Arcano Layers service worker: the app works offline once loaded, and installs as an app.
 //
 // `cargo xtask web` fills in the build's file list and version. Every file is precached into a
 // cache named after the version, served cache-first (responses keep the server's headers, so
 // the page stays cross-origin isolated: COOP/COEP), and old versions are dropped once the new
 // one activates. Anything else same-origin is fetched from the network and cached for next time,
 // except the config file, which must stay live.
-const VERSION = "57119249f208d6d4";
+const VERSION = "8324cfe2d2c1f856";
 const FILES = ["./", "./audio-worklet.js", "./effectcraft_web.js", "./effectcraft_web_bg.wasm", "./favicon.svg", "./icon-256.png", "./icon-512.png", "./index.html", "./manifest.webmanifest", "./snippets/effectcraft-web-c498d8085dfd4d35/js/host.js", "./snippets/eframe-d31a8450ea12dfc1/inline0.js", "./worker.js"];
 const CACHE = `effectcraft-${VERSION}`;
 
