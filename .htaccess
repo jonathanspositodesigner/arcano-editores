@@ -5,7 +5,7 @@ AddOutputFilterByType DEFLATE application/wasm text/javascript text/html
 </IfModule>
 
 # Código-fonte e configuração não são públicos.
-RedirectMatch 404 ^/(conector|patches|\.github)(/|$)
+RedirectMatch 404 ^/(conector|patches|desktop|\.github)(/|$)
 RedirectMatch 404 ^/versoes\.env$
 
 # A hospedagem põe "Content-Security-Policy: upgrade-insecure-requests", que troca o

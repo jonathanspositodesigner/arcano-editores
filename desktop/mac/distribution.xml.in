@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>@NOME@</title>
+  <background file="fundo-mac-claro.png" alignment="bottomleft" scaling="none" mime-type="image/png"/>
+  <background-darkAqua file="fundo-mac.png" alignment="bottomleft" scaling="none" mime-type="image/png"/>
+  <welcome file="bem-vindo.html" mime-type="text/html"/>
+  <conclusion file="pronto.html" mime-type="text/html"/>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_localSystem="true"/>
+  <choices-outline><line choice="padrao"/></choices-outline>
+  <choice id="padrao" title="@NOME@"><pkg-ref id="@ID@"/></choice>
+  <pkg-ref id="@ID@" version="@VERSAO@" onConclusion="none">app.pkg</pkg-ref>
+</installer-gui-script>

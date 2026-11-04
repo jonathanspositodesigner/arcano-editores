@@ -1,15 +1,24 @@
-"""Gera as imagens do instalador (identidade do ArcanoApp): lateral das telas de
-boas-vindas/fim (164x314) e faixa do topo (150x57). BMP 24 bits, como o NSIS pede."""
+"""Gera as imagens dos instaladores (identidade do ArcanoApp): lateral das telas de
+boas-vindas/fim (164x314) e faixa do topo (150x57), BMP 24 bits como o NSIS pede, e o fundo
+do instalador do Mac (.pkg).
+
+Sem argumentos: as do Arcano Conector, nesta pasta.
+Com argumentos: python3 arte.py <logo.png> <título 1> <título 2> <linha|linha|linha> <pasta de saída>"""
 import pathlib
+import sys
 from PIL import Image, ImageDraw, ImageFont
 
 AQUI = pathlib.Path(__file__).parent
 LOGO = Image.open(AQUI.parent / "patches/assets/arcano-256.png").convert("RGBA")
+TITULOS = ("Arcano", "Conector")
+LINHAS = ("Liga o Arcano Layers", "do navegador ao", "Claude do seu PC")
+SAIDA = AQUI
 FUNDO = (20, 16, 28)
 
 
 def fonte(tam, negrito=True):
     for f in (["segoeuib.ttf", "C:/Windows/Fonts/segoeuib.ttf"] if negrito else ["segoeui.ttf", "C:/Windows/Fonts/segoeui.ttf"]) + \
+             (["/System/Library/Fonts/Supplemental/Arial Bold.ttf"] if negrito else ["/System/Library/Fonts/Supplemental/Arial.ttf"]) + \
              ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if negrito else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]:
         try:
             return ImageFont.truetype(f, tam)
@@ -50,24 +59,44 @@ def lateral():
     im = brilho(im, 82, 92, 90, (168, 85, 247), 120)
     im.alpha_composite(logo(96), (34, 44))
     d = ImageDraw.Draw(im)
-    for texto, y, f, cor in (("Arcano", 168, fonte(20), (255, 255, 255)), ("Conector", 192, fonte(20), (192, 132, 252))):
+    for texto, y, f, cor in ((TITULOS[0], 168, fonte(20), (255, 255, 255)), (TITULOS[1], 192, fonte(20), (192, 132, 252))):
         w = d.textlength(texto, font=f)
         d.text(((164 - w) / 2, y), texto, font=f, fill=cor)
     f = fonte(10, False)
-    for i, linha in enumerate(("Liga o Arcano Layers", "do navegador ao", "Claude do seu PC")):
+    for i, linha in enumerate(LINHAS):
         w = d.textlength(linha, font=f)
         d.text(((164 - w) / 2, 232 + i * 14), linha, font=f, fill=(170, 160, 190))
     d.rectangle([0, 310, 164, 314], fill=(168, 85, 247))
-    im.convert("RGB").save(AQUI / "lado.bmp")
+    im.convert("RGB").save(SAIDA / "lado.bmp")
 
 
 def topo():
     im = Image.new("RGBA", (150, 57), FUNDO + (255,))
     im = brilho(im, 120, 28, 40, (168, 85, 247), 90)
     im.alpha_composite(logo(38), (102, 10))
-    im.convert("RGB").save(AQUI / "topo.bmp")
+    im.convert("RGB").save(SAIDA / "topo.bmp")
 
 
+def fundo_mac():
+    """Fundo do instalador .pkg do Mac (fica no canto de baixo à esquerda, atrás do texto)."""
+    im = degrade(620, 418, FUNDO, (38, 18, 64))
+    im = brilho(im, 90, 330, 160, (168, 85, 247), 110)
+    im.alpha_composite(logo(120), (30, 270))
+    im.convert("RGB").save(SAIDA / "fundo-mac.png")
+    # Versão clara (Mac no modo claro: o texto do instalador é escuro).
+    im = degrade(620, 418, (250, 247, 255), (236, 226, 252))
+    im = brilho(im, 90, 330, 160, (168, 85, 247), 60)
+    im.alpha_composite(logo(120), (30, 270))
+    im.convert("RGB").save(SAIDA / "fundo-mac-claro.png")
+
+
+if len(sys.argv) > 1:
+    LOGO = Image.open(sys.argv[1]).convert("RGBA")
+    TITULOS = (sys.argv[2], sys.argv[3])
+    LINHAS = tuple(sys.argv[4].split("|"))
+    SAIDA = pathlib.Path(sys.argv[5])
+    SAIDA.mkdir(parents=True, exist_ok=True)
+    fundo_mac()
 lateral()
 topo()
-print("ok lado.bmp topo.bmp")
+print("ok", SAIDA)

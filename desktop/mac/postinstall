@@ -1,0 +1,12 @@
+#!/bin/bash
+# Depois de instalar: liga o Arcano Conector para quem está usando o Mac agora (sem reiniciar).
+PLIST="/Library/LaunchAgents/br.com.voxvisual.arcano.conector.plist"
+chown root:wheel "$PLIST"; chmod 644 "$PLIST"
+chmod 755 "/Library/Application Support/Arcano/ArcanoConector"
+USUARIO=$(stat -f%Su /dev/console)
+if [ -n "$USUARIO" ] && [ "$USUARIO" != "root" ]; then
+  UID_U=$(id -u "$USUARIO")
+  launchctl bootout "gui/$UID_U/br.com.voxvisual.arcano.conector" 2>/dev/null || true
+  launchctl bootstrap "gui/$UID_U" "$PLIST" 2>/dev/null || launchctl asuser "$UID_U" launchctl load -w "$PLIST" 2>/dev/null || true
+fi
+exit 0

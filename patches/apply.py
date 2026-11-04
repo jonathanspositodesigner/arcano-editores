@@ -318,7 +318,23 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
+def desktop(app, raiz):
+    """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
+    que só existem no programa de computador (janela, diálogos)."""
+    sys.path.insert(0, str(pathlib.Path(__file__).parent))
+    import icones
+    nomes = (("EffectCraft", None), ("PhotoCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br"))
+    if app == "effectcraft":
+        icones.gerar("video", pathlib.Path(raiz) / "assets/app-icon", "effectcraft", "ai.storyteller.effectcraft")
+        nomes_restantes(raiz, pastas=("apps/effectcraft/src",), nomes=nomes)
+    else:
+        icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
+        nomes_restantes(raiz, pastas=("apps/photocraft/src",), nomes=nomes)
+
+
 if __name__ == "__main__":
     app, raiz = sys.argv[1], sys.argv[2]
     {"photocraft": photocraft, "effectcraft": effectcraft}[app](raiz)
+    if "--desktop" in sys.argv[3:]:
+        desktop(app, raiz)
     print("patches aplicados:", app)

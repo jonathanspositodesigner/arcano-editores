@@ -1,0 +1,217 @@
+# Instaladores para PC (Windows e Mac) dos editores do Arcano Layers, com o Arcano Conector
+# embutido. Publica em downloads/ (servido em layers.voxvisual.com.br/downloads/).
+name: Build PC
+
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Qual editor"
+        type: choice
+        options: [ambos, video, imagem]
+        default: ambos
+      so:
+        description: "Qual sistema"
+        type: choice
+        options: [ambos, windows, mac]
+        default: ambos
+  # Só manual: build lento roda quando o dono mandar.
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-pc
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: inputs.so != 'mac'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(inputs.app == 'ambos' && '["video","imagem"]' || format('["{0}"]', inputs.app)) }}
+    runs-on: windows-latest
+    timeout-minutes: 240
+    env:
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: site }
+      - name: Dados do programa
+        run: |
+          cat site/versoes.env >> "$GITHUB_ENV"
+          python site/desktop/app.py ${{ matrix.app }} >> "$GITHUB_ENV"
+      - name: Ref do código original
+        run: echo "REF=${!REF_VAR}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO }}
+          ref: ${{ env.REF }}
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+          key: pc-win-${{ matrix.app }}-${{ env.REF }}
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Patches Arcano (versão de PC)
+        run: |
+          python -m pip install --quiet pillow
+          python site/patches/apply.py "$PATCH" src --desktop
+      - name: Compilar
+        working-directory: src
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo build --release --locked -p "$CRATE"
+      - name: Arcano Conector (Node embutido)
+        working-directory: site/conector
+        run: |
+          echo '{"main":"arcano-conector.js","output":"sea-prep.blob","disableExperimentalSEAWarning":true}' > sea-config.json
+          node --experimental-sea-config sea-config.json
+          cp "$(command -v node)" ArcanoConector.exe
+          npx --yes postject@1.0.0-alpha.6 ArcanoConector.exe NODE_SEA_BLOB sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 --overwrite
+          python -c "from PIL import Image; Image.open('../patches/assets/arcano-256.png').save('arcano.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+      - name: Instalador (NSIS)
+        run: |
+          V="${REF#v}"
+          ST=pacote; mkdir -p $ST
+          cp "src/target/release/$CRATE.exe" "$ST/$PASTA.exe"
+          cp "src/assets/app-icon/$CRATE.ico" "$ST/app.ico"
+          cp src/NOTICE "$ST/NOTICE" 2>/dev/null || true
+          cp site/conector/ArcanoConector.exe "$ST/"
+          cp site/conector/arcano.ico "$ST/conector.ico"
+          cp site/desktop/instalador-app.nsi "$ST/"
+          python site/conector/arte.py "src/assets/app-icon/$CRATE-1024.png" "Arcano Layers" "$TITULO2" "$LINHAS" "$ST"
+          python - <<PY
+          import os
+          d = {"NOME": os.environ["NOME"], "PASTA": os.environ["PASTA"], "EXE": os.environ["PASTA"] + ".exe",
+               "SAIDA": os.environ["ARQUIVO"] + "-Windows.exe", "VERSAO": "$V", "PAGINA": "https://arcanoapp.voxvisual.com.br"}
+          with open("$ST/defs.nsh", "w", encoding="utf-8-sig") as f:
+              for k, v in d.items():
+                  f.write(f'!define {k} "{v}"\n')
+          PY
+          if ! command -v makensis >/dev/null; then choco install nsis -y --no-progress; fi
+          MAKENSIS=$(command -v makensis || echo "/c/Program Files (x86)/NSIS/makensis.exe")
+          (cd $ST && "$MAKENSIS" instalador-app.nsi)
+          ls -la "$ST/$ARQUIVO-Windows.exe"
+      - name: Publicar
+        run: |
+          F="$ARQUIVO-Windows.exe"
+          TAM=$(stat -c %s "pacote/$F")
+          [ "$TAM" -lt 99000000 ] || { echo "instalador com $TAM bytes: passa do limite de 100 MB do GitHub"; exit 1; }
+          cd site
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          mkdir -p downloads
+          cp "../pacote/$F" "downloads/$F"
+          git add "downloads/$F"
+          git diff --cached --quiet && exit 0
+          git commit -m "Instalador $NOME (Windows)"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
+
+  mac:
+    if: inputs.so != 'windows'
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(inputs.app == 'ambos' && '["video","imagem"]' || format('["{0}"]', inputs.app)) }}
+    runs-on: macos-latest
+    timeout-minutes: 300
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: site }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Dados do programa
+        run: |
+          cat site/versoes.env >> "$GITHUB_ENV"
+          python site/desktop/app.py ${{ matrix.app }} >> "$GITHUB_ENV"
+      - name: Ref do código original
+        run: echo "REF=${!REF_VAR}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.REPO }}
+          ref: ${{ env.REF }}
+          path: src
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: "aarch64-apple-darwin,x86_64-apple-darwin" }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src
+          key: pc-mac-${{ matrix.app }}-${{ env.REF }}
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Patches Arcano (versão de PC)
+        run: |
+          python -m pip install --quiet pillow
+          python site/patches/apply.py "$PATCH" src --desktop
+      - name: Compilar (Apple Silicon + Intel)
+        working-directory: src
+        run: cargo build --release --locked -p "$CRATE" --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: App (.app)
+        run: |
+          V="${REF#v}"
+          APP="raiz/Applications/$NOME.app"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          lipo -create -output "$APP/Contents/MacOS/$CRATE" "src/target/aarch64-apple-darwin/release/$CRATE" "src/target/x86_64-apple-darwin/release/$CRATE"
+          cp "src/assets/app-icon/$CRATE.icns" "$APP/Contents/Resources/app.icns"
+          cp src/NOTICE "$APP/Contents/Resources/NOTICE" 2>/dev/null || true
+          sed -e "s|@NOME@|$NOME|g" -e "s|@ID@|$ID|g" -e "s|@EXE@|$CRATE|g" -e "s|@VERSAO@|$V|g" site/desktop/mac/Info.plist.in > "$APP/Contents/Info.plist"
+          plutil -lint "$APP/Contents/Info.plist"
+          printf 'APPL????' > "$APP/Contents/PkgInfo"
+          codesign --force --deep --sign - "$APP"
+      - name: Arcano Conector (Node embutido, Apple Silicon + Intel)
+        working-directory: site/conector
+        run: |
+          NV=$(node -v)
+          echo '{"main":"arcano-conector.js","output":"sea-prep.blob","disableExperimentalSEAWarning":true}' > sea-config.json
+          node --experimental-sea-config sea-config.json
+          for A in arm64 x64; do
+            curl -fsSL "https://nodejs.org/dist/$NV/node-$NV-darwin-$A.tar.gz" | tar -xz
+            cp "node-$NV-darwin-$A/bin/node" "conector-$A"
+            codesign --remove-signature "conector-$A"
+            npx --yes postject@1.0.0-alpha.6 "conector-$A" NODE_SEA_BLOB sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 --macho-segment-name NODE_SEA --overwrite
+            codesign --sign - "conector-$A"
+          done
+          lipo -create -output ArcanoConector conector-arm64 conector-x64
+          codesign --force --sign - ArcanoConector
+          mkdir -p "../../raiz/Library/Application Support/Arcano" ../../raiz/Library/LaunchAgents
+          cp ArcanoConector "../../raiz/Library/Application Support/Arcano/ArcanoConector"
+          cp ../desktop/mac/conector.plist ../../raiz/Library/LaunchAgents/br.com.voxvisual.arcano.conector.plist
+      - name: Instalador (.pkg)
+        run: |
+          V="${REF#v}"
+          mkdir -p scripts recursos
+          cp site/desktop/mac/postinstall scripts/
+          python site/conector/arte.py "src/assets/app-icon/$CRATE-1024.png" "Arcano Layers" "$TITULO2" "$LINHAS" recursos
+          for f in bem-vindo.html pronto.html; do sed -e "s|@NOME@|$NOME|g" "site/desktop/mac/$f" > "recursos/$f"; done
+          sed -e "s|@NOME@|$NOME|g" -e "s|@ID@|$ID|g" -e "s|@VERSAO@|$V|g" site/desktop/mac/distribution.xml.in > distribution.xml
+          # O app vai sempre para /Applications (sem "realocar" para outra cópia achada no Mac).
+          pkgbuild --analyze --root raiz componentes.plist
+          python -c "import plistlib; p='componentes.plist'; d=plistlib.load(open(p,'rb')); [c.update(BundleIsRelocatable=False) for c in d]; plistlib.dump(d, open(p,'wb'))"
+          pkgbuild --root raiz --component-plist componentes.plist --identifier "$ID" --version "$V" --scripts scripts --install-location / app.pkg
+          productbuild --distribution distribution.xml --resources recursos --package-path . "$ARQUIVO-Mac.pkg"
+          ls -la "$ARQUIVO-Mac.pkg"
+      - name: Publicar
+        run: |
+          F="$ARQUIVO-Mac.pkg"
+          TAM=$(stat -f %z "$F")
+          [ "$TAM" -lt 99000000 ] || { echo "instalador com $TAM bytes: passa do limite de 100 MB do GitHub"; exit 1; }
+          cd site
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          mkdir -p downloads
+          cp "../$F" "downloads/$F"
+          git add "downloads/$F"
+          git diff --cached --quiet && exit 0
+          git commit -m "Instalador $NOME (Mac)"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
