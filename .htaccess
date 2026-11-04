@@ -14,3 +14,12 @@ RedirectMatch 404 ^/versoes\.env$
 Header always unset Content-Security-Policy
 Header unset Content-Security-Policy
 </IfModule>
+
+# Sem cache velho: a cada build o .js e o .wasm têm o mesmo nome; um .js velho guardado
+# (navegador ou Cloudflare) com o .wasm novo quebra o editor. "no-cache" = o navegador
+# confere com o servidor (resposta 304, sem baixar de novo se não mudou).
+<IfModule mod_headers.c>
+<FilesMatch "\.(html|js|mjs|json|wasm|svg|png|webmanifest|css|exe)$">
+Header set Cache-Control "no-cache"
+</FilesMatch>
+</IfModule>

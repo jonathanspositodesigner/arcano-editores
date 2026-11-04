@@ -25,6 +25,9 @@
     }
   } catch (e) { /* segue normal */ }
 
+  // Botão de voltar ao ArcanoApp.
+  (function () { var s = document.createElement('script'); s.src = '../painel/voltar.js'; document.head.appendChild(s); })();
+
   var LARGURA = 380, CHAVE = 'arcano-painel-aberto';
   var aberto = true;
   try { aberto = localStorage.getItem(CHAVE) !== '0'; } catch (e) { /* sem storage */ }

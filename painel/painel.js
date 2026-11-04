@@ -167,6 +167,24 @@
     return verificando;
   }
 
+  // O Chrome pede licença para o site falar com programas do próprio PC ("acesso à rede local").
+  // Se a pessoa negou (ou o Chrome negou sozinho), o painel nunca acha o conector: explica como liberar.
+  function avisarPermissaoRede() {
+    if (!navigator.permissions || !navigator.permissions.query) { return; }
+    ['loopback-network', 'local-network-access'].forEach(function (nome) {
+      navigator.permissions.query({ name: nome }).then(function (p) {
+        if (p.state !== 'denied' || document.getElementById('aviso-rede')) { return; }
+        var d = document.createElement('div');
+        d.id = 'aviso-rede';
+        d.className = 'nota';
+        d.innerHTML = '<b>O Chrome bloqueou o acesso ao conector.</b> Clique no ícone à esquerda do endereço do site ' +
+          '(<b>layers.voxvisual.com.br</b>) → <b>Configurações do site</b> → em <b>Acesso à rede local</b> (ou <b>Apps no dispositivo</b>) escolha <b>Permitir</b>. Depois recarregue a página.';
+        var c = document.getElementById('configurar-corpo');
+        if (c) { c.appendChild(d); }
+      }).catch(function () { /* este Chrome não conhece essa permissão */ });
+    });
+  }
+
   var repetir = null;
   function verificarDeTempos(ms) {
     clearInterval(repetir);
@@ -187,6 +205,7 @@
         '<button class="sec" id="b-verificar">Já instalei</button></div>' +
         '<p class="nota">Se o navegador perguntar se o site pode acessar <b>dispositivos da rede local</b>, clique em <b>Permitir</b>: é assim que o painel encontra o conector no seu PC.</p>');
       $('#b-verificar').onclick = function () { corpoConfigurar('<p>Procurando o conector…</p>'); verificar(); };
+      avisarPermissaoRede();
       verificarDeTempos(6000);
       return;
     }

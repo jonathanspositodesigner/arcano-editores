@@ -1,26 +1,65 @@
 ; Instalador do Arcano Conector (Windows). Instala só para o usuário atual (sem admin),
 ; liga junto com o Windows (escondido, sem janela) e já deixa rodando.
+; Visual: Modern UI 2 com as cores do ArcanoApp (imagens geradas pelo arte.py no build).
 Unicode true
+!include "MUI2.nsh"
 !define NOME "Arcano Conector"
 !ifndef VERSAO
   !define VERSAO "0.1.0"
 !endif
 Name "${NOME}"
+Caption "${NOME} · instalação"
 OutFile "ArcanoConector-Instalador.exe"
 InstallDir "$LOCALAPPDATA\ArcanoConector"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
-Icon "arcano.ico"
-UninstallIcon "arcano.ico"
-BrandingText "ArcanoApp"
+BrandingText "ArcanoApp · arcanoapp.voxvisual.com.br"
+ShowInstDetails nevershow
+ShowUninstDetails nevershow
 VIProductVersion "${VERSAO}.0"
 VIAddVersionKey "ProductName" "${NOME}"
 VIAddVersionKey "FileDescription" "Liga o Arcano Layers do navegador ao Claude Code do seu PC"
 VIAddVersionKey "FileVersion" "${VERSAO}"
 VIAddVersionKey "CompanyName" "ArcanoApp"
 
-Page instfiles
-UninstPage instfiles
+; ── Visual ──
+!define MUI_ICON "arcano.ico"
+!define MUI_UNICON "arcano.ico"
+!define MUI_BGCOLOR "14101C"
+!define MUI_TEXTCOLOR "FFFFFF"
+!define MUI_HEADERIMAGE
+!define MUI_HEADERIMAGE_RIGHT
+!define MUI_HEADERIMAGE_BITMAP "topo.bmp"
+!define MUI_HEADERIMAGE_UNBITMAP "topo.bmp"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "lado.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "lado.bmp"
+!define MUI_INSTFILESPAGE_PROGRESSBAR "smooth"
+!define MUI_ABORTWARNING
+!define MUI_ABORTWARNING_TEXT "Quer mesmo cancelar a instalação do Arcano Conector?"
+
+; ── Passo 1: boas-vindas ──
+!define MUI_WELCOMEPAGE_TITLE "Bem-vindo ao Arcano Conector"
+!define MUI_WELCOMEPAGE_TEXT "O Arcano Conector é um app pequeno que liga o Arcano Layers (no navegador) ao Claude do seu computador. É ele que deixa a IA mexer no seu projeto.$\r$\n$\r$\n• Instala só para você, sem pedir senha de administrador.$\r$\n• Liga sozinho junto com o Windows, escondido (sem janela).$\r$\n• Só conversa com o Arcano Layers, nada de fora.$\r$\n$\r$\nClique em Instalar para começar."
+!insertmacro MUI_PAGE_WELCOME
+
+; ── Passo 2: instalando ──
+!define MUI_PAGE_HEADER_TEXT "Instalando"
+!define MUI_PAGE_HEADER_SUBTEXT "Só alguns segundos…"
+!insertmacro MUI_PAGE_INSTFILES
+
+; ── Passo 3: pronto ──
+!define MUI_FINISHPAGE_TITLE "Pronto! O conector está ligado"
+!define MUI_FINISHPAGE_TEXT "Volte para o Arcano Layers no navegador e clique em $\"Já instalei$\".$\r$\n$\r$\nSe o Chrome perguntar se o site pode acessar a rede local ou apps do seu dispositivo, clique em Permitir: é assim que o painel encontra o conector."
+!define MUI_FINISHPAGE_LINK "Abrir o Arcano Layers"
+!define MUI_FINISHPAGE_LINK_LOCATION "https://layers.voxvisual.com.br/video/"
+!define MUI_FINISHPAGE_LINK_COLOR "C084FC"
+!define MUI_FINISHPAGE_NOREBOOTSUPPORT
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "PortugueseBR"
 
 Section "Instalar"
   ; Para a cópia antiga (se estiver rodando) antes de trocar o arquivo.
@@ -43,7 +82,6 @@ Section "Instalar"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ArcanoConector" "NoModify" 1
   ; Já liga agora.
   Exec 'wscript.exe "$INSTDIR\iniciar.vbs"'
-  DetailPrint "Pronto! Volte ao Arcano Layers no navegador: o painel já encontra o conector."
 SectionEnd
 
 Section "Uninstall"

@@ -3,4 +3,9 @@
  * Fica FORA do build: a trava de login e o painel do Photoshop (Arcano Design) entram aqui
  * sem recompilar o editor. Por enquanto não faz nada.
  */
-(function () { 'use strict'; window.ARCANO_GANCHO_IMAGEM = true; })();
+(function () {
+  'use strict';
+  window.ARCANO_GANCHO_IMAGEM = true;
+  // Botão de voltar ao ArcanoApp.
+  (function () { var s = document.createElement('script'); s.src = '../painel/voltar.js'; document.head.appendChild(s); })();
+})();

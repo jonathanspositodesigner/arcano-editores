@@ -11,6 +11,31 @@ import pathlib
 import sys
 
 NOME = "Arcano Layers"
+GRUPO = "https://chat.whatsapp.com/GugrdeclB1WLetsn5eqnP8"  # o mesmo da página de isca (GRUPO_COMUNIDADE)
+VOLTAR = "https://arcanoapp.voxvisual.com.br/arcano-layers"
+
+# Formato de arquivo: trocar o nome aqui quebraria abrir projetos.
+NAO_MEXER = ("interchange/xml_project.rs", "disk_cache.rs")
+
+
+def nomes_restantes(r, pastas=("crates", "apps"), nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br"), ("PhotoCraft", None))):
+    """Troca o nome deles em todo arquivo de código/texto (menos testes e formatos de arquivo)."""
+    total = 0
+    for pasta in pastas:
+        for p in sorted((pathlib.Path(r) / pasta).rglob("*")):
+            if p.suffix not in (".rs", ".js", ".html", ".webmanifest", ".json", ".tsv") or not p.is_file():
+                continue
+            rel = p.as_posix()
+            if "/tests/" in rel or "/tests.rs" in rel or rel.endswith("_tests.rs") or any(rel.endswith(x) for x in NAO_MEXER):
+                continue
+            t = p.read_text(encoding="utf-8")
+            n = t
+            for velho, novo in nomes:
+                n = n.replace(velho, novo or NOME)
+            if n != t:
+                p.write_text(n, encoding="utf-8")
+                total += 1
+    print(f"ok  nome trocado em {total} arquivos")
 
 
 def troca(raiz, arquivo, antigo, novo, todas=False):
@@ -47,12 +72,23 @@ def photocraft(r):
     troca(r, "crates/ui-egui/src/dialogs.rs",
           "                crate::links::discord_button(app, ui, 220.0);\n                ui.add_space(8.0);\n",
           "")
-    # Menu Ajuda: o item do Discord passa a abrir o ArcanoApp.
-    troca(r, "crates/ui-egui/src/links.rs",
-          'pub const DISCORD: &str = "https://discord.gg/artcraft";',
-          'pub const DISCORD: &str = "https://arcanoapp.voxvisual.com.br";')
+    # Links: grupo do WhatsApp (o da página de isca) e voltar ao ArcanoApp; nada do ArtCraft.
+    links = "crates/ui-egui/src/links.rs"
+    troca(r, links, 'pub const DISCORD: &str = "https://discord.gg/artcraft";', f'pub const DISCORD: &str = "{GRUPO}";')
+    troca(r, links, 'pub const ARTCRAFT_WEBSITE: &str = "https://getartcraft.com";', f'pub const ARTCRAFT_WEBSITE: &str = "{VOLTAR}";')
+    troca(r, links, 'pub const APP_PAGE: &str = "https://getartcraft.com/apps/photocraft";', f'pub const APP_PAGE: &str = "{VOLTAR}";')
+    troca(r, links, 'pub const GITHUB: &str = "https://github.com/storytold/photocraft";', f'pub const GITHUB: &str = "{VOLTAR}";')
+    troca(r, links, 'pub const ISSUES: &str = "https://github.com/storytold/photocraft/issues";', f'pub const ISSUES: &str = "{GRUPO}";')
+    troca(r, links, 'let links = [(tl!("PhotoCraft website"), APP_PAGE), (tl!("GitHub"), GITHUB), (tl!("ArtCraft"), ARTCRAFT_WEBSITE)];',
+          'let links = [("Voltar ao ArcanoApp", APP_PAGE), ("Entrar no grupo do WhatsApp", DISCORD)];')
+    # Menu Ajuda: só grupo do WhatsApp, voltar ao ArcanoApp, informações do sistema e Sobre.
     troca(r, "crates/engine/src/shell_commands.rs",
-          '"Join the ArtCraft Discord…"', '"Abrir o ArcanoApp…"')
+          '    ("help.discord", "Join the ArtCraft Discord…", &["Help"], None),\n    ("help.website", "PhotoCraft Website", &["Help"], None),\n    ("help.artcraftWebsite", "ArtCraft Website", &["Help"], None),\n    ("help.github", "PhotoCraft on GitHub", &["Help"], None),\n    ("help.reportIssue", "Report an Issue…", &["Help"], None),\n',
+          '    ("help.discord", "Entrar no grupo do WhatsApp", &["Help"], None),\n    ("help.website", "Voltar ao ArcanoApp", &["Help"], None),\n')
+    # Sobre: texto nosso (a licença e os créditos ficam: a licença exige).
+    troca(r, "crates/ui-egui/src/dialogs.rs",
+          'ui.label(tl!("PhotoCraft — an open-source, native image editor written in Rust."));',
+          'ui.label("Editor de imagem do ArcanoApp, direto no navegador. Feito a partir de software de código aberto.");')
     # Título da aba do navegador.
     for f in ("apps/photocraft-web/index.html", "apps/photocraft-web-boot/index.html"):
         p = pathlib.Path(r) / f
@@ -78,6 +114,9 @@ def photocraft(r):
     troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(16, 98, 196)", "accent_text: Color32::from_rgb(126, 34, 206)")
     # Ícone do canto superior esquerdo (onde o Photoshop mostra o "Ps").
     copia(ASSETS / "arcano-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
+    # Nome deles em qualquer texto que sobrou (menus, mensagens, traduções .tsv).
+    nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "apps/photocraft-web", "apps/photocraft-web-boot"),
+                    nomes=(("PhotoCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
 ASSETS = pathlib.Path(__file__).parent / "assets"
@@ -165,6 +204,37 @@ def effectcraft(r):
           '"name": "EffectCraft"', f'"name": "{NOME} · Vídeo"')
     troca(r, "apps/effectcraft-web/web/manifest.webmanifest",
           '"short_name": "EffectCraft"', '"short_name": "Arcano Vídeo"')
+
+    # ── Sem nada do ArtCraft/EffectCraft (pedido do dono, 04/11/2026) ──
+    # Links: grupo do WhatsApp (o da página de isca) e voltar ao ArcanoApp.
+    troca(r, "crates/engine/src/home/links.rs", 'pub const DISCORD: &str = "https://discord.gg/artcraft";', f'pub const DISCORD: &str = "{GRUPO}";')
+    troca(r, "crates/engine/src/home/links.rs", 'pub const WEBSITE: &str = "https://getartcraft.com";', f'pub const WEBSITE: &str = "{VOLTAR}";')
+    troca(r, "crates/engine/src/home/links.rs", 'pub const APP_PAGE: &str = "https://getartcraft.com/apps/effectcraft";', f'pub const APP_PAGE: &str = "{VOLTAR}";')
+    troca(r, "crates/engine/src/home/links.rs", 'pub const GITHUB: &str = "https://github.com/storytold/effectcraft";', f'pub const GITHUB: &str = "{VOLTAR}";')
+    troca(r, "crates/engine/src/home/links.rs", 'pub const ISSUES: &str = "https://github.com/storytold/effectcraft/issues";', f'pub const ISSUES: &str = "{GRUPO}";')
+    troca(r, "crates/engine/src/home/links.rs", 'format!("https://github.com/storytold/{slug}")', f'{{ let _ = slug; String::from("{VOLTAR}") }}')
+    troca(r, "crates/engine/src/home/links.rs", 'format!("https://getartcraft.com/apps/{slug}")', f'{{ let _ = slug; String::from("{VOLTAR}") }}')
+    # F1 / ajuda abria a documentação deles no GitHub.
+    troca(r, "crates/engine/src/cmd/help.rs", 'open(s, format!("{}/blob/main/{page}", links::GITHUB))', '{ let _ = page; open(s, links::WEBSITE.into()) }')
+    # Menu Ajuda enxuto: sem Discord, GitHub, site e documentação deles.
+    troca(r, "crates/engine/src/menus.rs",
+          "Help\n  EffectCraft Help... | help.docs {\"page\":\"help\"} | F1\n  Scripting Help... | help.docs {\"page\":\"scripting\"}\n  Expression Reference... | help.docs {\"page\":\"expressions\"}\n  Effect Reference... | help.docs {\"page\":\"effects\"}\n  Animation Presets... | anim.browsePresets\n  Keyboard Shortcuts... | app.keyboardShortcuts\n  ---\n  In-App Tutorials... | help.inAppTutorials\n  Online Tutorials... | help.onlineTutorials\n  ---\n  System Compatibility Report... | help.systemReport\n  Enable Logging | help.enableLogging\n  Reveal Logging File | help.revealLogFile\n  ---\n  Join the ArtCraft Discord... | help.discord\n  Provide Feedback... | help.reportIssue\n  ---\n  ArtCraft Website | help.website\n  EffectCraft Home Page | help.appPage\n  EffectCraft on GitHub | help.github\n  Open Demo Project | file.openDemoProject\n",
+          "Help\n  Animation Presets... | anim.browsePresets\n  Keyboard Shortcuts... | app.keyboardShortcuts\n  ---\n  In-App Tutorials... | help.inAppTutorials\n  Open Demo Project | file.openDemoProject\n  ---\n  System Compatibility Report... | help.systemReport\n  Enable Logging | help.enableLogging\n  Reveal Logging File | help.revealLogFile\n  ---\n  Entrar no grupo do WhatsApp | help.discord\n  Voltar ao ArcanoApp | help.website\n")
+    # Sobre: texto nosso + só 2 botões (grupo do WhatsApp e voltar ao ArcanoApp).
+    # O rodapé da licença (MIT/Apache) e a aba de créditos ficam: a licença exige.
+    troca(r, "crates/ui-egui/src/panels/dialogs.rs",
+          'format!("Version {}  •  Motion graphics & VFX in pure Rust", env!("CARGO_PKG_VERSION"))',
+          'format!("Versão {}  •  editor de vídeo do ArcanoApp", env!("CARGO_PKG_VERSION"))')
+    troca(r, "crates/ui-egui/src/panels/dialogs.rs",
+          'ui.label(tr("A clean-room, open-source compositor for motion graphics and visual effects: native on macOS, Windows and Linux, and in the browser. Part of the ArtCraft family of creative apps."));',
+          'ui.label("Editor de vídeo e motion do ArcanoApp, direto no navegador, com o painel do Arcano Motion ao lado. Feito a partir de software de código aberto (licença abaixo).");')
+    troca(r, "crates/ui-egui/src/panels/dialogs.rs",
+          '    let links: [(Icon, &str, &str, &\'static str); 4] = [\n        (Icon::Chat, "Join the ArtCraft Discord", effectcraft_engine::links::DISCORD, "help.discord"),\n        (Icon::Globe, "ArtCraft website", effectcraft_engine::links::WEBSITE, "help.website"),\n        (Icon::Sparkle, "EffectCraft home page", effectcraft_engine::links::APP_PAGE, "help.appPage"),\n        (Icon::Code, "Source code on GitHub", effectcraft_engine::links::GITHUB, "help.github"),\n    ];',
+          '    let links: [(Icon, &str, &str, &\'static str); 2] = [\n        (Icon::Chat, "Entrar no grupo do WhatsApp", effectcraft_engine::links::DISCORD, "help.discord"),\n        (Icon::Globe, "Voltar ao ArcanoApp", effectcraft_engine::links::WEBSITE, "help.website"),\n    ];')
+    troca(r, "crates/ui-egui/src/panels/dialogs.rs", "Color32::from_rgb(0x58, 0x65, 0xf2)", "Color32::from_rgb(0x1f, 0xa8, 0x55)")  # verde WhatsApp
+    # Nome deles em qualquer texto que sobrou (menus, mensagens, tutoriais, traduções).
+    nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "crates/effects", "crates/script", "crates/export", "crates/lottie", "apps/effectcraft-web"),
+                    nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
 if __name__ == "__main__":
