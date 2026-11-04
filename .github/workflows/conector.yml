@@ -1,0 +1,61 @@
+# Gera o instalador do Arcano Conector para Windows (Node embutido, sem dependências)
+# e publica em conector/ArcanoConector-Instalador.exe (servido em layers.voxvisual.com.br).
+name: Build conector
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["conector/**", ".github/workflows/conector.yml"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-conector
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Executável (Node SEA)
+        shell: bash
+        working-directory: conector
+        run: |
+          node -e "require('./arcano-conector.js')" # confere que carrega sem erro
+          echo '{"main":"arcano-conector.js","output":"sea-prep.blob","disableExperimentalSEAWarning":true}' > sea-config.json
+          node --experimental-sea-config sea-config.json
+          cp "$(command -v node)" ArcanoConector.exe
+          npx --yes postject@1.0.0-alpha.6 ArcanoConector.exe NODE_SEA_BLOB sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 --overwrite
+      - name: Ícone
+        shell: bash
+        working-directory: conector
+        run: |
+          python -m pip install --quiet pillow
+          python -c "from PIL import Image; Image.open('../patches/assets/arcano-256.png').save('arcano.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+      - name: Instalador (NSIS)
+        shell: bash
+        working-directory: conector
+        run: |
+          V=$(node -e "console.log(require('./arcano-conector.js').VERSAO)")
+          if ! command -v makensis >/dev/null; then choco install nsis -y --no-progress; fi
+          MAKENSIS=$(command -v makensis || echo "/c/Program Files (x86)/NSIS/makensis.exe")
+          "$MAKENSIS" -DVERSAO=$V instalador.nsi
+          ls -la ArcanoConector-Instalador.exe
+      - name: Publicar
+        shell: bash
+        run: |
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          mkdir -p downloads
+          cp conector/ArcanoConector-Instalador.exe downloads/ArcanoConector-Instalador.exe
+          git add downloads/ArcanoConector-Instalador.exe
+          git diff --cached --quiet && exit 0
+          git commit -m "Instalador do Arcano Conector"
+          for i in 1 2 3; do git pull --rebase -q && git push && break; sleep 5; done

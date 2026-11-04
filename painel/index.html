@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arcano Motion</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="painel.css">
+</head>
+<body>
+  <header class="topo">
+    <img src="arcano-128.png" alt="" class="logo" onerror="this.style.display='none'">
+    <div class="marca"><strong>Arcano Motion</strong><span>no navegador</span></div>
+    <nav class="abas">
+      <button data-aba="chat" class="ativa">Chat</button>
+      <button data-aba="conta">Conta</button>
+    </nav>
+  </header>
+
+  <!-- CONFIGURAR: aparece no lugar do chat enquanto falta conector, Claude Code ou login -->
+  <section id="configurar" class="tela" hidden>
+    <div class="cartao">
+      <div class="passos">
+        <div class="passo" data-passo="conector"><span class="bola">1</span><div><b>Arcano Conector</b><small>liga o navegador ao seu PC</small></div></div>
+        <div class="passo" data-passo="claude"><span class="bola">2</span><div><b>Claude Code</b><small>a IA que anima, no seu PC</small></div></div>
+        <div class="passo" data-passo="login"><span class="bola">3</span><div><b>Login no Claude</b><small>com a conta do seu plano</small></div></div>
+      </div>
+      <div id="configurar-corpo"></div>
+    </div>
+  </section>
+
+  <!-- CHAT -->
+  <section id="chat" class="tela" hidden>
+    <div id="mensagens" class="mensagens"></div>
+    <form id="form-chat" class="caixa">
+      <textarea id="pedido" rows="3" placeholder="Peça uma animação, um efeito, um ajuste…"></textarea>
+      <div class="linha">
+        <select id="modelo" title="Modelo do Claude">
+          <option value="opus">Opus (recomendado)</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="haiku">Haiku (rápido)</option>
+        </select>
+        <button type="button" id="nova" class="sec" title="Começar uma conversa nova">Nova conversa</button>
+        <button type="submit" id="enviar" class="pri">Enviar</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- CONTA -->
+  <section id="conta" class="tela" hidden>
+    <div class="cartao" id="conta-corpo"></div>
+  </section>
+
+  <script src="painel.js"></script>
+</body>
+</html>

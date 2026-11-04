@@ -1,0 +1,68 @@
+:root {
+  --fundo: #141416; --fundo2: #1b1b1f; --fundo3: #232328; --borda: #2c2c33;
+  --texto: #e6e6ea; --texto2: #a1a1aa; --texto3: #71717a;
+  --roxo: #a855f7; --roxo2: #c084fc; --roxo-fundo: rgba(168, 85, 247, 0.14);
+  --verde: #4ade80; --amarelo: #fbbf24; --vermelho: #f87171;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column; background: var(--fundo); color: var(--texto);
+  font: 13px/1.45 Manrope, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden;
+}
+button, select, textarea { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+.topo { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--borda); }
+.logo { width: 28px; height: 28px; border-radius: 8px; }
+.marca { display: flex; flex-direction: column; line-height: 1.1; }
+.marca strong { font-weight: 800; font-size: 14px; letter-spacing: -0.01em; }
+.marca span { font-size: 11px; color: var(--texto3); }
+.abas { margin-left: auto; display: flex; gap: 2px; background: var(--fundo2); padding: 3px; border-radius: 9px; }
+.abas button { border: 0; background: none; padding: 5px 10px; border-radius: 7px; color: var(--texto2); cursor: pointer; font-weight: 600; }
+.abas button.ativa { background: var(--roxo-fundo); color: #fff; }
+
+.tela { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.cartao { margin: 12px; padding: 14px; background: var(--fundo2); border: 1px solid var(--borda); border-radius: 12px; overflow: auto; }
+.cartao h3 { margin: 0 0 6px; font-size: 15px; font-weight: 800; }
+.cartao p { margin: 0 0 10px; color: var(--texto2); }
+.cartao .nota { font-size: 12px; color: var(--texto3); margin-top: 10px; }
+
+.passos { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.passo { display: flex; align-items: center; gap: 10px; opacity: 0.55; }
+.passo small { display: block; color: var(--texto3); font-size: 11px; }
+.passo .bola { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--fundo3); font-weight: 800; font-size: 12px; }
+.passo.atual { opacity: 1; }
+.passo.atual .bola { background: var(--roxo); color: #fff; }
+.passo.feito { opacity: 1; }
+.passo.feito .bola { background: rgba(74, 222, 128, 0.18); color: var(--verde); }
+
+.pri, .sec { border-radius: 9px; padding: 8px 14px; font-weight: 700; cursor: pointer; border: 1px solid transparent; }
+.pri { background: var(--roxo); color: #fff; }
+.pri:hover { background: #b46cf8; }
+.pri:disabled { opacity: 0.5; cursor: default; }
+.sec { background: var(--fundo3); border-color: var(--borda); color: var(--texto); }
+.sec:hover { border-color: #44444d; }
+.botoes { display: flex; gap: 8px; flex-wrap: wrap; }
+.aviso { padding: 8px 10px; border-radius: 8px; background: rgba(251, 191, 36, 0.1); color: var(--amarelo); font-size: 12px; margin-bottom: 10px; }
+.ok { color: var(--verde); font-weight: 700; }
+
+.mensagens { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.vazio { margin: auto; text-align: center; color: var(--texto3); max-width: 260px; }
+.vazio b { display: block; color: var(--texto); font-size: 15px; margin-bottom: 4px; }
+.msg { padding: 9px 11px; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word; max-width: 100%; }
+.msg.eu { align-self: flex-end; background: var(--roxo-fundo); border: 1px solid rgba(168, 85, 247, 0.35); max-width: 88%; }
+.msg.ia { background: var(--fundo2); border: 1px solid var(--borda); }
+.msg.erro { background: rgba(248, 113, 113, 0.1); color: var(--vermelho); border: 1px solid rgba(248, 113, 113, 0.3); }
+.ferr { font-size: 11px; color: var(--texto3); padding-left: 4px; }
+.ferr::before { content: '⚙ '; color: var(--roxo2); }
+.pensando { font-size: 12px; color: var(--roxo2); padding-left: 4px; animation: pulsar 1.4s infinite; }
+@keyframes pulsar { 50% { opacity: 0.4; } }
+
+.caixa { border-top: 1px solid var(--borda); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.caixa textarea { resize: none; background: var(--fundo2); border: 1px solid var(--borda); border-radius: 10px; padding: 9px 10px; outline: none; }
+.caixa textarea:focus { border-color: rgba(168, 85, 247, 0.6); }
+.caixa .linha { display: flex; gap: 6px; align-items: center; }
+.caixa select { background: var(--fundo2); border: 1px solid var(--borda); border-radius: 8px; padding: 6px; max-width: 150px; }
+.caixa .pri { margin-left: auto; }
+.caixa .sec { padding: 6px 10px; font-size: 12px; }

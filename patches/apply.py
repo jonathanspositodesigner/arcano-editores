@@ -101,6 +101,12 @@ def effectcraft(r):
     troca(r, tema, "from_rgb(0xaa, 0xc8, 0xf0)", "from_rgb(0xe0, 0xc8, 0xfd)", todas=True)  # tema claro: linha selecionada
     troca(r, tema, "from_rgb(0xb0, 0xcf, 0xec)", "from_rgb(0xe4, 0xd0, 0xfd)", todas=True)  # tema claro: cabeçalho de efeito
     troca(r, "apps/effectcraft-web/web/index.html", "#2d8ceb", "#a855f7", todas=True)
+    troca(r, "apps/effectcraft-web/web/index.html", "#4aa0f5", "#c084fc", todas=True)
+    # Painel do Arcano Motion ao lado da composição (mora em /painel, fora do build:
+    # muda sem recompilar o editor).
+    troca(r, "apps/effectcraft-web/web/index.html",
+          '<canvas id="effectcraft_canvas"></canvas>',
+          '<canvas id="effectcraft_canvas"></canvas>\n  <script src="../painel/montar.js"></script>')
     # Telas de carregamento e de erro.
     troca(r, "apps/effectcraft-web/web/index.html", "Loading EffectCraft…", f"Carregando {NOME}…")
     troca(r, "apps/effectcraft-web/web/index.html", '"EffectCraft failed to start:\\n"', f'"{NOME} não conseguiu abrir:\\n"')
