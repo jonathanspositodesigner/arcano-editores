@@ -57,6 +57,7 @@ jobs:
         with:
           workspaces: src
           key: pc-win-${{ matrix.app }}-${{ env.REF }}
+          cache-on-failure: true
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - uses: actions/setup-node@v4
@@ -101,20 +102,16 @@ jobs:
           MAKENSIS=$(command -v makensis || echo "/c/Program Files (x86)/NSIS/makensis.exe")
           (cd $ST && "$MAKENSIS" instalador-app.nsi)
           ls -la "$ST/$ARQUIVO-Windows.exe"
-      - name: Publicar
+      - name: Publicar (GitHub Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Instalador passa de 100 MB (limite de arquivo no repositório): vai para a página de
+          # downloads do GitHub (release "pc"), que aceita até 2 GB e é pública.
           F="$ARQUIVO-Windows.exe"
-          TAM=$(stat -c %s "pacote/$F")
-          [ "$TAM" -lt 99000000 ] || { echo "instalador com $TAM bytes: passa do limite de 100 MB do GitHub"; exit 1; }
-          cd site
-          git config user.name "arcano-build"
-          git config user.email "arcano-build@users.noreply.github.com"
-          mkdir -p downloads
-          cp "../pacote/$F" "downloads/$F"
-          git add "downloads/$F"
-          git diff --cached --quiet && exit 0
-          git commit -m "Instalador $NOME (Windows)"
-          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
+          gh release view pc -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create pc -R "$GITHUB_REPOSITORY" --title "Arcano Layers para PC" --notes "Instaladores do Arcano Layers (Windows e Mac), com o Arcano Conector." || true
+          gh release upload pc "pacote/$F" -R "$GITHUB_REPOSITORY" --clobber
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/pc/$F"
 
   mac:
     if: inputs.so != 'windows'
@@ -148,6 +145,7 @@ jobs:
         with:
           workspaces: src
           key: pc-mac-${{ matrix.app }}-${{ env.REF }}
+          cache-on-failure: true
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - name: Patches Arcano (versão de PC)
@@ -201,17 +199,13 @@ jobs:
           pkgbuild --root raiz --component-plist componentes.plist --identifier "$ID" --version "$V" --scripts scripts --install-location / app.pkg
           productbuild --distribution distribution.xml --resources recursos --package-path . "$ARQUIVO-Mac.pkg"
           ls -la "$ARQUIVO-Mac.pkg"
-      - name: Publicar
+      - name: Publicar (GitHub Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Instalador passa de 100 MB (limite de arquivo no repositório): vai para a página de
+          # downloads do GitHub (release "pc"), que aceita até 2 GB e é pública.
           F="$ARQUIVO-Mac.pkg"
-          TAM=$(stat -f %z "$F")
-          [ "$TAM" -lt 99000000 ] || { echo "instalador com $TAM bytes: passa do limite de 100 MB do GitHub"; exit 1; }
-          cd site
-          git config user.name "arcano-build"
-          git config user.email "arcano-build@users.noreply.github.com"
-          mkdir -p downloads
-          cp "../$F" "downloads/$F"
-          git add "downloads/$F"
-          git diff --cached --quiet && exit 0
-          git commit -m "Instalador $NOME (Mac)"
-          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
+          gh release view pc -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create pc -R "$GITHUB_REPOSITORY" --title "Arcano Layers para PC" --notes "Instaladores do Arcano Layers (Windows e Mac), com o Arcano Conector." || true
+          gh release upload pc "$F" -R "$GITHUB_REPOSITORY" --clobber
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/download/pc/$F"
