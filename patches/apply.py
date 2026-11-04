@@ -58,15 +58,54 @@ def photocraft(r):
         p = pathlib.Path(r) / f
         t = p.read_text(encoding="utf-8")
         if "<title>PhotoCraft</title>" in t:
-            p.write_text(t.replace("<title>PhotoCraft</title>", f"<title>{NOME} · Imagem</title>"), encoding="utf-8")
+            t = t.replace("<title>PhotoCraft</title>",
+                          f'<title>{NOME} · Imagem</title>\n  <link rel="icon" href="arcano.svg" type="image/svg+xml">')
+            p.write_text(t, encoding="utf-8")
             print(f"ok  {f}")
+    # Tela de carregamento (a que aparece antes do editor abrir).
+    troca(r, "apps/photocraft-web-boot/index.html", "<p>Loading PhotoCraft&hellip;</p>", f"<p>Carregando {NOME}&hellip;</p>")
+    troca(r, "apps/photocraft-web-boot/index.html",
+          "This is taking longer than usual. If PhotoCraft doesn't start, its files may have failed to\n      download or come from a different version of this page. <a href=\"\">Reload</a> to try again; the browser\n      console lists what failed.",
+          "Está demorando mais que o normal. Se não abrir, <a href=\"\">recarregue a página</a>.")
+    # Ícone do canto superior esquerdo (onde o Photoshop mostra o "Ps").
+    copia(ASSETS / "arcano-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
+
+
+ASSETS = pathlib.Path(__file__).parent / "assets"
+
+
+def copia(origem, destino):
+    destino.write_bytes(origem.read_bytes())
+    print(f"ok  {destino.name} <- {origem.name}")
 
 
 def effectcraft(r):
-    # Logo do ArtCraft (marca registrada deles, não é open source): não desenha mais.
-    troca(r, "crates/ui-egui/src/header.rs",
-          "pub fn paint_logo(p: &egui::Painter, r: Rect) {\n",
-          "pub fn paint_logo(p: &egui::Painter, r: Rect) {\n    if true {\n        let _ = (p, r);\n        return;\n    }\n")
+    # Logo do ArtCraft (marca registrada deles, não é open source) vira o logo do Arcano.
+    copia(ASSETS / "arcano-256.png", pathlib.Path(r) / "docs/brand/artcraft-mark.png")
+    for nome, arq in (("favicon.svg", "arcano.svg"), ("icon-256.png", "arcano-256.png"), ("icon-512.png", "arcano-512.png")):
+        destino = pathlib.Path(r) / "apps/effectcraft-web/web" / nome
+        if destino.exists():
+            copia(ASSETS / arq, destino)
+        else:
+            print(f"aviso: {nome} não está em web/ (copiado no workflow)")
+    # Telas de carregamento e de erro.
+    troca(r, "apps/effectcraft-web/web/index.html", "Loading EffectCraft…", f"Carregando {NOME}…")
+    troca(r, "apps/effectcraft-web/web/index.html", '"EffectCraft failed to start:\\n"', f'"{NOME} não conseguiu abrir:\\n"')
+    troca(r, "apps/effectcraft-web/web/index.html",
+          'content="EffectCraft: motion graphics and visual effects in the browser"',
+          f'content="{NOME}: editor de vídeo e motion no navegador"')
+    troca(r, "apps/effectcraft-web/js/host.js", '"The graphics device was lost"', '"A placa de vídeo parou de responder"')
+    troca(r, "apps/effectcraft-web/js/host.js",
+          '"EffectCraft can\'t update the display any more. Your project is still open. "',
+          '"O editor não consegue mais atualizar a tela. Seu projeto continua aberto. "')
+    troca(r, "apps/effectcraft-web/js/host.js",
+          '"Reload to continue: the project and its unsaved changes come back."',
+          '"Recarregue para continuar: o projeto e o que não foi salvo voltam."')
+    troca(r, "apps/effectcraft-web/js/host.js",
+          '"This session isn\'t kept in browser storage: save the project before you reload."',
+          '"Esta sessão não fica salva no navegador: salve o projeto antes de recarregar."')
+    troca(r, "apps/effectcraft-web/js/host.js", 'save.textContent = "Save Project";', 'save.textContent = "Salvar projeto";')
+    troca(r, "apps/effectcraft-web/js/host.js", 'reload.textContent = "Reload";', 'reload.textContent = "Recarregar";')
     # Barra do topo: tira Discord, GitHub e site deles.
     troca(r, "crates/ui-egui/src/header.rs",
           "fn community_buttons(app: &mut EffectcraftApp, ui: &mut egui::Ui, p: &egui::Painter, mut rx: f32, cy: f32) -> f32 {\n",
