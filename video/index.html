@@ -34,13 +34,14 @@
       background: #232323; color: #e3e3e3; font: inherit; cursor: pointer;
     }
     #device-lost button:hover { background: #303030; }
-    #device-lost button:last-child { background: #2d8ceb; border-color: #2d8ceb; }
-    #device-lost button:last-child:hover { background: #4aa0f5; }
+    #device-lost button:last-child { background: #a855f7; border-color: #a855f7; }
+    #device-lost button:last-child:hover { background: #c084fc; }
     #device-lost button:disabled { opacity: 0.6; cursor: default; }
   </style>
 </head>
 <body>
   <canvas id="effectcraft_canvas"></canvas>
+  <script src="../painel/montar.js"></script>
   <div id="loading"><img src="favicon.svg" alt=""><div id="status">Carregando Arcano Layers…</div></div>
   <script type="module">
     import init, * as ec from "./effectcraft_web.js";
