@@ -67,6 +67,10 @@ def photocraft(r):
     troca(r, "apps/photocraft-web-boot/index.html",
           "This is taking longer than usual. If PhotoCraft doesn't start, its files may have failed to\n      download or come from a different version of this page. <a href=\"\">Reload</a> to try again; the browser\n      console lists what failed.",
           "Está demorando mais que o normal. Se não abrir, <a href=\"\">recarregue a página</a>.")
+    # Cor de destaque: o azul vira o roxo do ArcanoApp (#A855F7, o mesmo hsl 271 91% 65%).
+    troca(r, "crates/ui-egui/src/theme.rs", "from_rgb(55, 142, 240)", "from_rgb(168, 85, 247)", todas=True)
+    troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(0, 66, 150)", "accent_text: Color32::from_rgb(107, 33, 168)")
+    troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(16, 98, 196)", "accent_text: Color32::from_rgb(126, 34, 206)")
     # Ícone do canto superior esquerdo (onde o Photoshop mostra o "Ps").
     copia(ASSETS / "arcano-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
 
@@ -88,6 +92,15 @@ def effectcraft(r):
             copia(ASSETS / arq, destino)
         else:
             print(f"aviso: {nome} não está em web/ (copiado no workflow)")
+    # Cor de destaque: azul vira o roxo do ArcanoApp (tema escuro e claro).
+    tema = "crates/ui-egui/src/theme.rs"
+    troca(r, tema, "from_rgb(0x2d, 0x8c, 0xeb)", "from_rgb(0xa8, 0x55, 0xf7)", todas=True)  # destaque
+    troca(r, tema, "from_rgb(0x4a, 0xa0, 0xf5)", "from_rgb(0xc0, 0x84, 0xfc)", todas=True)  # destaque (hover)
+    troca(r, tema, "from_rgb(0x3d, 0x8f, 0xf5)", "from_rgb(0xb3, 0x6b, 0xf9)", todas=True)  # texto quente, timecode, keyframe
+    troca(r, tema, "from_rgb(0x00, 0x5a, 0x9c)", "from_rgb(0x7e, 0x22, 0xce)", todas=True)  # tema claro: texto quente
+    troca(r, tema, "from_rgb(0xaa, 0xc8, 0xf0)", "from_rgb(0xe0, 0xc8, 0xfd)", todas=True)  # tema claro: linha selecionada
+    troca(r, tema, "from_rgb(0xb0, 0xcf, 0xec)", "from_rgb(0xe4, 0xd0, 0xfd)", todas=True)  # tema claro: cabeçalho de efeito
+    troca(r, "apps/effectcraft-web/web/index.html", "#2d8ceb", "#a855f7", todas=True)
     # Telas de carregamento e de erro.
     troca(r, "apps/effectcraft-web/web/index.html", "Loading EffectCraft…", f"Carregando {NOME}…")
     troca(r, "apps/effectcraft-web/web/index.html", '"EffectCraft failed to start:\\n"', f'"{NOME} não conseguiu abrir:\\n"')
