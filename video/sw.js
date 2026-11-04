@@ -5,7 +5,7 @@
 // the page stays cross-origin isolated: COOP/COEP), and old versions are dropped once the new
 // one activates. Anything else same-origin is fetched from the network and cached for next time,
 // except the config file, which must stay live.
-const VERSION = "404d5326425e92b0";
+const VERSION = "887fc9069546cdae";
 const FILES = ["./", "./audio-worklet.js", "./effectcraft_web.js", "./effectcraft_web_bg.wasm", "./favicon.svg", "./icon-256.png", "./icon-512.png", "./index.html", "./manifest.webmanifest", "./snippets/effectcraft-web-c498d8085dfd4d35/js/host.js", "./snippets/eframe-d31a8450ea12dfc1/inline0.js", "./worker.js"];
 const CACHE = `effectcraft-${VERSION}`;
 
