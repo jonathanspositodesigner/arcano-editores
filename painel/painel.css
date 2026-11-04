@@ -66,3 +66,26 @@ button, select, textarea { font: inherit; color: inherit; }
 .caixa select { background: var(--fundo2); border: 1px solid var(--borda); border-radius: 8px; padding: 6px; max-width: 150px; }
 .caixa .pri { margin-left: auto; }
 .caixa .sec { padding: 6px 10px; font-size: 12px; }
+
+/* Tutorial do conector */
+.mini-passos { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.mini-passos span { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 99px; background: var(--fundo3); color: var(--texto3); }
+.mini-passos span.atual { background: var(--roxo); color: #fff; }
+.mini-passos span.feito { background: rgba(74, 222, 128, 0.15); color: var(--verde); }
+.tuto { margin: 4px 0 12px; padding-left: 18px; color: var(--texto2); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.tuto b { color: var(--texto); }
+.tela-chrome { margin: 4px 0 12px; border: 1px solid var(--borda); border-radius: 10px; background: #202124; padding: 8px; font-family: system-ui, sans-serif; }
+.tela-chrome .barra { display: flex; align-items: center; gap: 8px; background: #35363a; border-radius: 99px; padding: 5px 10px; }
+.tela-chrome .icone-site { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; color: #e8eaed; font-size: 12px; }
+.tela-chrome .url { color: #e8eaed; font-size: 12px; }
+.tela-chrome .balao { margin-top: 8px; margin-left: 6px; width: 86%; background: #2d2e31; border: 1px solid #3c4043; border-radius: 10px; padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+.tela-chrome .balao b { color: #e8eaed; font-size: 12px; }
+.tela-chrome .balao span { color: #bdc1c6; font-size: 11.5px; }
+.tela-chrome .balao-bt { display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px; }
+.tela-chrome .bt-falso { border: 1px solid #5f6368; border-radius: 99px; padding: 3px 10px; color: #8ab4f8 !important; font-weight: 600; }
+.tela-chrome .bt-falso.sim { background: #8ab4f8; color: #202124 !important; border-color: #8ab4f8; }
+.tela-chrome .linha-menu { display: flex; justify-content: space-between; align-items: center; padding: 5px 6px; border-radius: 6px; color: #e8eaed !important; }
+.tela-chrome .chave { font-style: normal; color: #8ab4f8; font-size: 11px; }
+.tela-chrome .alvo, .tela-chrome .alvo2 { outline: 2px solid #c084fc; outline-offset: 2px; animation: alvo 1.4s infinite; }
+@keyframes alvo { 0%, 100% { box-shadow: 0 0 0 0 rgba(192, 132, 252, 0.7); } 60% { box-shadow: 0 0 0 7px rgba(192, 132, 252, 0); } }
+a.pri, a.sec { text-decoration: none; display: inline-block; }

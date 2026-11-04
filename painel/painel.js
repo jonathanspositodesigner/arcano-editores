@@ -154,7 +154,8 @@
       el.classList.toggle('atual', j === i);
     });
   }
-  function corpoConfigurar(html) { $('#configurar-corpo').innerHTML = html; }
+  var telaMostrada = '';  // evita redesenhar a mesma tela a cada consulta ao conector
+  function corpoConfigurar(html, chave) { $('#configurar-corpo').innerHTML = html; telaMostrada = chave || ''; }
 
   function verificar() {
     if (verificando) { return verificando; }
@@ -167,23 +168,114 @@
     return verificando;
   }
 
-  // O Chrome pede licença para o site falar com programas do próprio PC ("acesso à rede local").
-  // Se a pessoa negou (ou o Chrome negou sozinho), o painel nunca acha o conector: explica como liberar.
-  function avisarPermissaoRede() {
-    if (!navigator.permissions || !navigator.permissions.query) { return; }
-    ['loopback-network', 'local-network-access'].forEach(function (nome) {
-      navigator.permissions.query({ name: nome }).then(function (p) {
-        if (p.state !== 'denied' || document.getElementById('aviso-rede')) { return; }
-        var d = document.createElement('div');
-        d.id = 'aviso-rede';
-        d.className = 'nota';
-        d.innerHTML = '<b>O Chrome bloqueou o acesso ao conector.</b> Clique no ícone à esquerda do endereço do site ' +
-          '(<b>layers.voxvisual.com.br</b>) → <b>Configurações do site</b> → em <b>Acesso à rede local</b> (ou <b>Apps no dispositivo</b>) escolha <b>Permitir</b>. Depois recarregue a página.';
-        var c = document.getElementById('configurar-corpo');
-        if (c) { c.appendChild(d); }
-      }).catch(function () { /* este Chrome não conhece essa permissão */ });
+  // ─── Passo 1: conector (baixar → instalar → liberar o Chrome), com tutorial ───
+  // O Chrome pede licença para o site falar com programas do próprio PC. Sem ela o painel
+  // nunca acha o conector, então o passo a passo ensina a liberar (com desenho da tela).
+  var ETAPA = 'arcano-conector-etapa';
+  function etapa(v) {
+    try { if (v) { localStorage.setItem(ETAPA, v); } return localStorage.getItem(ETAPA) || 'baixar'; } catch (e) { return v || 'baixar'; }
+  }
+  function permissaoRede() {
+    if (!navigator.permissions || !navigator.permissions.query) { return Promise.resolve('?'); }
+    var nomes = ['loopback-network', 'local-network-access'], estados = [];
+    return Promise.all(nomes.map(function (n) {
+      return navigator.permissions.query({ name: n }).then(function (p) { estados.push(p.state); }, function () { /* não existe neste Chrome */ });
+    })).then(function () {
+      if (estados.indexOf('denied') >= 0) { return 'denied'; }
+      if (estados.indexOf('prompt') >= 0) { return 'prompt'; }
+      return estados.length ? 'granted' : '?';
     });
   }
+  function recarregarTudo() { try { window.top.location.reload(); } catch (e) { location.reload(); } }
+
+  var DESENHO_PERGUNTA =
+    '<div class="tela-chrome"><div class="barra"><span class="icone-site">⚙</span><span class="url">layers.voxvisual.com.br</span></div>' +
+    '<div class="balao"><b>layers.voxvisual.com.br quer</b><span>Acessar outros apps e serviços neste dispositivo</span>' +
+    '<div class="balao-bt"><span class="bt-falso">Bloquear</span><span class="bt-falso sim alvo">Permitir</span></div></div></div>';
+  var DESENHO_DESBLOQUEAR =
+    '<div class="tela-chrome"><div class="barra"><span class="icone-site alvo">⚙</span><span class="url">layers.voxvisual.com.br</span></div>' +
+    '<div class="balao"><span class="linha-menu alvo2">Configurações do site</span>' +
+    '<span class="linha-menu">Acesso à rede local <i class="chave">Permitir ▾</i></span></div></div>';
+
+  function telaConector() {
+    var e = etapa();
+    var cab = '<div class="mini-passos">' + ['Baixar', 'Instalar', 'Liberar o Chrome'].map(function (t, i) {
+      var k = ['baixar', 'instalar', 'liberar'][i], at = ['baixar', 'instalar', 'liberar'].indexOf(e);
+      return '<span class="' + (i < at ? 'feito' : i === at ? 'atual' : '') + '">' + (i + 1) + '. ' + t + '</span>';
+    }).join('') + '</div>';
+
+    if (e === 'baixar') {
+      corpoConfigurar(cab +
+        '<h3>Instale o Arcano Conector</h3>' +
+        '<p>É um app pequeno que liga este painel ao Claude do seu computador. Você instala uma vez só.</p>' +
+        '<div class="botoes"><a class="pri" id="b-baixar" href="' + LINK_INSTALADOR + '" download>Baixar o instalador (Windows)</a>' +
+        '<button class="sec" id="b-ja">Já tenho instalado</button></div>', 'conector:baixar');
+      $('#b-baixar').onclick = function () { setTimeout(function () { etapa('instalar'); telaConector(); }, 300); };
+      $('#b-ja').onclick = function () { etapa('liberar'); telaConector(); };
+      return;
+    }
+    if (e === 'instalar') {
+      corpoConfigurar(cab +
+        '<h3>Abra o instalador</h3>' +
+        '<ol class="tuto">' +
+        '<li>Clique no arquivo <b>ArcanoConector-Instalador.exe</b> que baixou (fica nos downloads do Chrome, no canto de cima).</li>' +
+        '<li>Se aparecer <b>“O Windows protegeu o computador”</b>, clique em <b>Mais informações</b> e depois em <b>Executar assim mesmo</b>.</li>' +
+        '<li>Clique em <b>Instalar</b> e depois em <b>Concluir</b>.</li>' +
+        '</ol>' +
+        '<div class="botoes"><button class="pri" id="b-instalei">Já instalei</button>' +
+        '<a class="sec" href="' + LINK_INSTALADOR + '" download>Baixar de novo</a></div>', 'conector:instalar');
+      $('#b-instalei').onclick = function () { etapa('liberar'); telaConector(); };
+      return;
+    }
+    // liberar
+    telaMostrada = 'conector:liberar';
+    permissaoRede().then(function (estado) {
+      if (etapa() !== 'liberar' || base) { return; }
+      if (estado === 'denied') {
+        corpoConfigurar(cab +
+          '<h3>Destrave o Chrome</h3>' +
+          '<p>O Chrome está <b>bloqueando</b> este site de falar com o conector do seu PC. Para liberar:</p>' +
+          DESENHO_DESBLOQUEAR +
+          '<ol class="tuto">' +
+          '<li>Clique no ícone <b>à esquerda do endereço</b> do site, lá em cima (o desenho mostra onde).</li>' +
+          '<li>Clique em <b>Configurações do site</b>.</li>' +
+          '<li>Ache <b>Acesso à rede local</b> (em algumas versões: <b>Apps e serviços neste dispositivo</b>) e escolha <b>Permitir</b>.</li>' +
+          '<li>Volte aqui e clique em <b>Recarregar</b>.</li>' +
+          '</ol>' +
+          '<div class="botoes"><button class="pri" id="b-recarregar">Recarregar</button><button class="sec" id="b-voltar-inst">Ainda não instalei</button></div>', 'conector:liberar:bloqueado');
+        $('#b-recarregar').onclick = recarregarTudo;
+      } else {
+        corpoConfigurar(cab +
+          '<h3>Libere o Chrome</h3>' +
+          '<p>Clique em <b>Conectar</b>. O Chrome vai mostrar um aviso lá em cima, perto do endereço do site: clique em <b>Permitir</b>.</p>' +
+          DESENHO_PERGUNTA +
+          '<div class="botoes"><button class="pri" id="b-conectar">Conectar</button><button class="sec" id="b-voltar-inst">Ainda não instalei</button></div>' +
+          '<p class="nota" id="conectando"></p>', 'conector:liberar');
+        $('#b-conectar').onclick = function () {
+          // O pedido sai do clique: é isso que faz o Chrome mostrar o aviso de permissão.
+          $('#conectando').textContent = 'Procurando o conector… se o Chrome perguntar, clique em Permitir.';
+          verificar().then(function () {
+            if (base) { return; }
+            permissaoRede().then(function (st) {
+              if (st === 'denied') { telaConector(); return; }
+              $('#conectando').innerHTML = 'Ainda não achei o conector. Confira se você terminou a instalação (o instalador diz <b>Pronto!</b> no fim) e clique em Conectar de novo.';
+            });
+          });
+        };
+      }
+      var v = $('#b-voltar-inst');
+      if (v) { v.onclick = function () { etapa('instalar'); telaConector(); }; }
+    });
+  }
+
+  // Muda a tela sozinho quando a pessoa libera ou bloqueia no Chrome.
+  try {
+    ['loopback-network', 'local-network-access'].forEach(function (n) {
+      navigator.permissions.query({ name: n }).then(function (p) {
+        p.onchange = function () { if (!base) { if (p.state === 'granted') { verificar(); } else { telaConector(); } } };
+      }, function () {});
+    });
+  } catch (e) { /* sem API de permissões */ }
 
   var repetir = null;
   function verificarDeTempos(ms) {
@@ -198,15 +290,8 @@
   function telaConfigurar() {
     if (!base) {
       marcarPassos('conector');
-      corpoConfigurar(
-        '<h3>Instale o Arcano Conector</h3>' +
-        '<p>É um app pequeno que liga este painel ao Claude Code do seu computador. Você instala uma vez só.</p>' +
-        '<div class="botoes"><a class="pri" href="' + LINK_INSTALADOR + '" download>Baixar o instalador (Windows)</a>' +
-        '<button class="sec" id="b-verificar">Já instalei</button></div>' +
-        '<p class="nota">Se o navegador perguntar se o site pode acessar <b>dispositivos da rede local</b>, clique em <b>Permitir</b>: é assim que o painel encontra o conector no seu PC.</p>');
-      $('#b-verificar').onclick = function () { corpoConfigurar('<p>Procurando o conector…</p>'); verificar(); };
-      avisarPermissaoRede();
-      verificarDeTempos(6000);
+      if (telaMostrada.indexOf('conector:' + etapa()) !== 0) { telaConector(); }
+      verificarDeTempos(4000);
       return;
     }
     if (!statusClaude.instalado) {
