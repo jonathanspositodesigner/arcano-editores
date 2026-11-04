@@ -99,6 +99,15 @@ jobs:
         run: |
           V=$(sed -n 's/^const WASM_BINDGEN: &str = "\(.*\)";$/\1/p' src/xtask/src/main.rs)
           cargo install wasm-bindgen-cli --version "$V" --locked
+      - name: Binaryen (wasm-opt)
+        # O xtask do EffectCraft já roda o wasm-opt -O2 quando ele existe (deixa menor e mais rápido); o runner não tem.
+        run: |
+          V=version_133
+          if curl -fsSL "https://github.com/WebAssembly/binaryen/releases/download/$V/binaryen-$V-x86_64-linux.tar.gz" | tar -xz -C "$HOME"; then
+            echo "$HOME/binaryen-$V/bin" >> "$GITHUB_PATH"
+          else
+            sudo apt-get install -y binaryen
+          fi
       - name: Patches Arcano
         run: python3 site/patches/apply.py effectcraft src
       - name: Compilar
@@ -112,6 +121,7 @@ jobs:
           cp site/patches/assets/arcano-256.png site/video/icon-256.png
           cp site/patches/assets/arcano-512.png site/video/icon-512.png
           rm -f site/video/favicon.svg.attribution
+          python3 site/patches/limpar_wasm.py site/video/effectcraft_web_bg.wasm
           du -sh site/video
       - name: Publicar
         run: |
