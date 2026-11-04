@@ -21,7 +21,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: build-pc
+  group: build-pc-${{ inputs.so }}
   cancel-in-progress: false
 
 jobs:
