@@ -710,22 +710,22 @@ export function showDeviceLost(message, kept) {
   box.id = "device-lost";
   box.setAttribute("role", "alertdialog");
   const title = document.createElement("strong");
-  title.textContent = "The graphics device was lost";
+  title.textContent = "A placa de vídeo parou de responder";
   const text = document.createElement("p");
   text.textContent =
-    "EffectCraft can't update the display any more. Your project is still open. " +
-    (kept ? "Reload to continue: the project and its unsaved changes come back." : "This session isn't kept in browser storage: save the project before you reload.");
+    "O editor não consegue mais atualizar a tela. Seu projeto continua aberto. " +
+    (kept ? "Recarregue para continuar: o projeto e o que não foi salvo voltam." : "Esta sessão não fica salva no navegador: salve o projeto antes de recarregar.");
   const detail = document.createElement("small");
   detail.textContent = message;
   const save = document.createElement("button");
-  save.textContent = "Save Project";
+  save.textContent = "Salvar projeto";
   save.onclick = () =>
     self.effectcraft
       .execute("file.save", {})
       .catch(() => self.effectcraft.execute("file.saveAs", { path: "/Untitled Project.ecproj" }))
       .catch((e) => (text.textContent = `Saving failed: ${e?.message || e}`));
   const reload = document.createElement("button");
-  reload.textContent = "Reload";
+  reload.textContent = "Recarregar";
   reload.onclick = async () => {
     reload.disabled = true;
     try {
