@@ -158,8 +158,20 @@ impl Painel {
         };
         // menu, lista ou janela de aviso aberta (ex.: "Salvar alterações?" ao fechar o programa): o
         // painel é uma janela do sistema e ficaria por cima, aceso no meio do fundo escurecido.
+        // Também qualquer janela, menu ou caixa do editor que passe por cima do espaço do painel
+        // (Nova composição, Configurações, efeitos...): o painel sai da frente enquanto ela existir.
         let aviso = ctx.memory(|m| m.top_modal_layer().is_some());
-        let lugar = if (self.logado && egui::Popup::is_any_open(ctx)) || aviso { None } else { lugar };
+        let coberto = lugar.is_some_and(|r| {
+            let meus = [egui::Id::unique("arcano_painel_estado_video"), egui::Id::unique("arcano_painel_estado_imagem")];
+            ctx.memory(|m| {
+                m.areas().visible_layer_ids().into_iter().any(|l| {
+                    matches!(l.order, egui::Order::Middle | egui::Order::Foreground)
+                        && !meus.contains(&l.id)
+                        && m.area_rect(l.id).is_some_and(|a| a.intersects(r.shrink(2.0)))
+                })
+            })
+        });
+        let lugar = if (self.logado && egui::Popup::is_any_open(ctx)) || aviso || coberto { None } else { lugar };
         #[cfg(any(windows, target_os = "macos"))]
         {
             if self.web.is_none() && lugar.is_some() && self.erro.is_none() {
