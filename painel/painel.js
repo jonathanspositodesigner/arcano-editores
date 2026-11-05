@@ -162,7 +162,7 @@
     verificando = acharConector().then(function (r) {
       verificando = null;
       if (!r) { base = null; statusClaude = null; mostrar(); return; }
-      base = r.url; statusClaude = r.status.claude || {};
+      base = r.url; statusClaude = r.status.claude || {}; versaoConector = String(r.status.versao || '');
       mostrar();
     });
     return verificando;
@@ -289,7 +289,18 @@
 
   function pronto() { return !!(base && statusClaude && statusClaude.instalado && statusClaude.logado); }
 
+  var versaoConector = '';
+  // Aberto pelo plugin (espelho) só para instalar/atualizar o conector: o resto é com o plugin.
+  var SO_CONECTOR = location.hash === '#so-conector';
   function telaConfigurar() {
+    if (base && SO_CONECTOR && !/^0\.[2-9]|^[1-9]/.test(versaoConector)) {
+      marcarPassos('conector');
+      corpoConfigurar('<h3>Atualize o Arcano Conector</h3><p>O Arcano Motion no navegador precisa da versão nova do conector. Baixe e instale por cima (leva segundos): ele fecha o antigo sozinho.</p>' +
+        '<div class="botoes"><a class="pri" href="' + LINK_INSTALADOR + '" download>Baixar o conector novo</a></div>', 'conector:atualizar');
+      verificarDeTempos(4000);
+      return;
+    }
+    if (base && SO_CONECTOR) { corpoConfigurar('<h3>Conectado!</h3><p>Abrindo o Arcano Motion…</p>', 'conector:ok'); return; }
     if (!base) {
       marcarPassos('conector');
       if (telaMostrada.indexOf('conector:' + etapa()) !== 0) { telaConector(); }

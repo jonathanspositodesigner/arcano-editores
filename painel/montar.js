@@ -28,7 +28,7 @@
   // Botão de voltar ao ArcanoApp.
   (function () { var s = document.createElement('script'); s.src = '../painel/voltar.js'; document.head.appendChild(s); })();
 
-  var LARGURA = 380, CHAVE = 'arcano-painel-aberto';
+  var LARGURA = 400, CHAVE = 'arcano-painel-aberto';
   var aberto = true;
   try { aberto = localStorage.getItem(CHAVE) !== '0'; } catch (e) { /* sem storage */ }
 
@@ -56,7 +56,8 @@
   var painel = document.createElement('iframe');
   painel.id = 'arcano-painel';
   painel.title = 'Arcano Motion';
-  painel.src = '../painel/index.html';
+  // O PLUGIN de verdade (espelho do Arcano Motion, mesma versão do After). ?painelantigo = o painel provisório.
+  painel.src = /[?&]painelantigo/.test(location.search) ? '../painel/index.html' : '../plugin/index-web.html';
   painel.setAttribute('allow', 'clipboard-read; clipboard-write; local-network-access');
 
   var alca = document.createElement('button');
@@ -67,6 +68,37 @@
     try { localStorage.setItem(CHAVE, aberto ? '1' : '0'); } catch (e) { /* sem storage */ }
     aplicar();
   };
+
+  // Ponte do plugin com o editor: o que no After seria cep.evalScript (ExtendScript) roda aqui no
+  // script.run do editor (mesmo modelo do After: app.project, comps, layers…), no contexto que
+  // guarda as variáveis entre chamadas (a biblioteca arcano.jsx fica carregada).
+  function quandoEditorPronto(f, n) {
+    if (window.effectcraft && window.effectcraft.request) { f(); return; }
+    if ((n || 0) > 600) { f(new Error('o editor não abriu')); return; }
+    setTimeout(function () { quandoEditorPronto(f, (n || 0) + 1); }, 200);
+  }
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== painel.contentWindow) { return; }
+    var d = ev.data || {};
+    if (d.arcano !== 'eval') { return; }
+    var responder = function (o) { o.arcano = 'eval-resposta'; o.id = d.id; painel.contentWindow.postMessage(o, '*'); };
+    var tentar = function (n) {
+      Promise.resolve(window.effectcraft.request('script.run', { code: String(d.codigo || ''), name: 'arcano-motion', console: true }))
+        .then(function (r) {
+          r = r || {};
+          if (r.error) { responder({ ok: false, erro: typeof r.error === 'string' ? r.error : JSON.stringify(r.error) }); return; }
+          responder({ ok: true, resultado: r.result });
+        }, function (er) {
+          // o editor ainda está abrindo: tenta de novo por até 2 minutos
+          if (/not running yet/i.test(String(er)) && n < 240) { setTimeout(function () { tentar(n + 1); }, 500); return; }
+          responder({ ok: false, erro: String((er && er.message) || er) });
+        });
+    };
+    quandoEditorPronto(function (e) {
+      if (e) { responder({ ok: false, erro: e.message }); return; }
+      tentar(0);
+    });
+  });
 
   function montar() {
     document.body.appendChild(painel);

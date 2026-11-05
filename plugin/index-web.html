@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Arcano Motion</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<!-- abertura: logo animada enquanto o painel carrega -->
+<div class="splash" id="splash"><img src="img/logo-carregando.webp" alt=""><span class="splash-nome">Arcano Motion</span></div>
+<!-- carregando: aparece quando um efeito está sendo aplicado no After -->
+<div class="carregando" id="carregando" hidden><div class="carregando-caixa"><img src="img/logo-carregando.webp" alt=""><span class="carregando-txt" id="carregando-txt">Aplicando...</span></div></div>
+
+<!-- ================= LICENÇA ================= -->
+<section id="tela-licenca" class="tela tela-licenca" hidden>
+  <div class="lic-caixa">
+    <div class="lic-marca"><img class="lic-logo" src="img/marca-pilula.png" alt="" aria-hidden="true"><span class="lic-nome">Arcano Motion</span></div>
+    <div class="lic-idiomas idiomas" data-no-tr role="group" aria-label="Idioma / Language / Idioma">
+      <button class="idioma-op" type="button" data-idioma="pt">Português</button><button class="idioma-op" type="button" data-idioma="en">English</button><button class="idioma-op" type="button" data-idioma="es">Español</button>
+    </div>
+    <p class="lic-aviso" id="lic-aviso" role="status" hidden></p>
+    <div id="lic-form">
+      <p class="lic-sub">Entre com a sua conta do <b>ArcanoApp</b> (o mesmo e-mail e senha do site).</p>
+      <label class="lic-rotulo" for="lic-email">E-mail</label>
+      <input class="campo-solo lic-campo" id="lic-email" type="email" autocomplete="username" spellcheck="false" placeholder="seu@email.com">
+      <label class="lic-rotulo" for="lic-senha">Senha</label>
+      <div class="campo"><input id="lic-senha" type="password" autocomplete="current-password" placeholder="Sua senha do ArcanoApp"><button class="btn btn-campo" id="lic-ver-senha" type="button">Mostrar</button></div>
+      <button class="btn btn-primario btn-grande lic-entrar" id="lic-entrar" type="button">Entrar</button>
+      <div class="lic-links"><button class="link-inline" id="lic-esqueci" type="button">Esqueci minha senha</button><span>·</span><button class="link-inline" id="lic-criar" type="button">Criar conta</button><span>·</span><button class="link-inline" id="lic-suporte" type="button">Suporte</button></div>
+      <p class="lic-dica">Entra no site com o Google? Use "Esqueci minha senha" para criar uma senha e entrar aqui.</p>
+    </div>
+    <div class="lic-outro" id="lic-outro" hidden>
+      <div class="lic-outro-icone" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="13" height="9" rx="1.5"/><path d="M6 16h5M8.5 13v3"/><rect class="a-pc2" x="13" y="10" width="9" height="7" rx="1.2"/><path class="a-pc2" d="M16 20h3M17.5 17v3"/></svg></div>
+      <div class="lic-outro-titulo">Sua licença está ativa em outro computador</div>
+      <p class="lic-outro-texto">Ela está em uso em <b id="lic-outro-pc"></b>. <span id="lic-outro-visto"></span> O Arcano Motion funciona em um computador por vez.</p>
+      <button class="btn btn-primario btn-grande lic-entrar" id="lic-assumir" type="button">Desconectar o outro e usar aqui</button>
+      <button class="btn lic-entrar" id="lic-cancelar" type="button">Sair desta conta</button>
+    </div>
+    <div id="lic-cadastro" hidden>
+      <p class="lic-sub">Crie sua conta do <b>ArcanoApp</b>. É com ela que você entra no plugin e no site.</p>
+      <label class="lic-rotulo" for="lic-cad-nome">Nome completo</label>
+      <input class="campo-solo lic-campo" id="lic-cad-nome" type="text" autocomplete="name" maxlength="120" placeholder="Seu nome">
+      <label class="lic-rotulo" for="lic-cad-email">E-mail</label>
+      <input class="campo-solo lic-campo" id="lic-cad-email" type="email" autocomplete="email" spellcheck="false" placeholder="seu@email.com">
+      <label class="lic-rotulo" for="lic-cad-senha">Senha</label>
+      <div class="campo"><input id="lic-cad-senha" type="password" autocomplete="new-password" placeholder="No mínimo 6 caracteres"><button class="btn btn-campo" id="lic-cad-ver" type="button">Mostrar</button></div>
+      <button class="btn btn-primario btn-grande lic-entrar" id="lic-cad-criar" type="button">Criar conta</button>
+      <div class="lic-links"><button class="link-inline" id="lic-cad-voltar" type="button">Já tenho conta</button><span>·</span><button class="link-inline" id="lic-cad-suporte" type="button">Suporte</button></div>
+    </div>
+    <div class="lic-outro" id="lic-confirmar" hidden>
+      <div class="lic-outro-icone" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/><circle class="a-pc2" cx="19" cy="6" r="2.4" fill="currentColor" stroke="none"/></svg></div>
+      <div class="lic-outro-titulo">Confirme seu e-mail</div>
+      <p class="lic-outro-texto">Mandamos um link para <b id="lic-conf-email"></b>. Abra o e-mail (veja também a caixa de spam), clique no link e volte aqui.</p>
+      <button class="btn btn-primario btn-grande lic-entrar" id="lic-conf-entrar" type="button">Já confirmei, entrar</button>
+      <button class="btn lic-entrar" id="lic-conf-reenviar" type="button">Reenviar o e-mail</button>
+      <div class="lic-links"><button class="link-inline" id="lic-conf-voltar" type="button">Voltar</button><span>·</span><button class="link-inline" id="lic-conf-suporte" type="button">Suporte</button></div>
+    </div>
+    <div class="lic-outro" id="lic-semlic" hidden>
+      <div class="lic-acesso-titulo" id="lic-acesso-titulo" hidden>Escolha como liberar o Arcano Motion</div>
+      <div class="lic-parcela" id="lic-parcela" hidden>
+        <div class="lic-parcela-txt" id="lic-parcela-txt">Pagar parcela</div>
+        <p class="lic-op-texto">Pague a parcela no Pix para liberar de novo. O plugin libera sozinho assim que o Pix cair.</p>
+        <button class="btn btn-primario btn-grande lic-entrar" id="lic-parcela-pagar" type="button">Pagar parcela no Pix</button>
+      </div>
+      <div class="lic-opcao" id="lic-op-mensal" hidden>
+        <div class="ia-seg lic-planos" role="tablist" aria-label="Plano">
+          <button class="ia-seg-op" type="button" role="tab" data-plano="mensal"><span>Plugin</span></button>
+          <button class="ia-seg-op ativo" type="button" role="tab" data-plano="completo"><span>Completo</span><small>+ artes</small></button>
+        </div>
+        <div class="lic-op-cab"><span class="lic-op-nome" id="lic-mensal-nome">Plano Completo</span><span class="lic-op-preco"><b id="lic-mensal-preco"></b><small>/mês</small></span></div>
+        <p class="lic-op-texto" id="lic-mensal-texto">O plugin + mais de 600 artes editáveis (PSD e Canva), sem fidelidade. Cancele quando quiser.</p>
+        <p class="lic-op-bonus" id="lic-mensal-cred" hidden></p>
+        <div class="lic-op-botoes" id="lic-mensal-br">
+          <button class="btn btn-primario lic-entrar" id="lic-mensal-pix" type="button">Pagar com Pix</button>
+          <button class="btn lic-entrar" id="lic-mensal-cartao" type="button">Assinar no cartão (renova sozinho)</button>
+        </div>
+        <div class="lic-op-botoes" id="lic-mensal-intl" hidden>
+          <button class="btn btn-primario lic-entrar" id="lic-mensal-stripe" type="button">Assinar com cartão internacional</button>
+          <p class="lic-op-nota">Cobrado em reais. O banco do seu cartão converte para a sua moeda.</p>
+        </div>
+        <button class="link-inline lic-op-trocar" id="lic-mensal-trocar" type="button">Está fora do Brasil? Pagar com cartão internacional</button>
+      </div>
+      <div class="lic-op-ou" id="lic-op-ou" hidden><span>ou</span></div>
+      <div class="lic-opcao lic-op-anual" id="lic-op-anual" hidden>
+        <div class="lic-op-cab"><span class="lic-op-nome">Plano Anual <span class="lic-op-selo" id="lic-anual-selo" hidden></span></span><span class="lic-op-preco"><b id="lic-anual-preco"></b><small>/ano</small></span></div>
+        <p class="lic-op-texto">Tudo do Plano Completo (o plugin + mais de 600 artes editáveis) por 1 ano, num pagamento só. Não renova sozinho.</p>
+        <p class="lic-op-nota" id="lic-anual-mes" hidden></p>
+        <div class="lic-op-botoes" id="lic-anual-br">
+          <button class="btn btn-primario lic-entrar" id="lic-anual-pagar" type="button">Pagar o anual (Pix ou cartão em até 12x)</button>
+        </div>
+        <div class="lic-op-botoes" id="lic-anual-intl" hidden>
+          <button class="btn btn-primario lic-entrar" id="lic-anual-stripe" type="button">Pagar o anual com cartão internacional</button>
+        </div>
+      </div>
+      <button class="btn lic-entrar" id="lic-ja-comprei" type="button">Já paguei, verificar de novo</button>
+      <div class="lic-links"><button class="link-inline" id="lic-outra-conta" type="button">Entrar com outra conta</button><span>·</span><button class="link-inline" id="lic-semlic-suporte" type="button">Suporte no WhatsApp</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= SETUP: CODEX ================= -->
+<section id="tela-codex" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1>Conectar o Codex (ChatGPT)</h1>
+  <p class="lead">O Arcano Motion conversa com o Codex instalado no seu computador, usando o seu plano do ChatGPT. Clique no botão do passo 2: o plugin instala, abre o login e testa sozinho. Cada bolinha fica verde quando estiver certo.</p>
+  <ol class="passos">
+    <li class="passo"><span class="passo-num">1</span><div class="passo-corpo">
+      <h2>Node.js</h2>
+      <p>O Codex precisa do Node.js. Se não tiver, o botão do passo 2 instala junto.</p>
+      <div class="status" id="st-cx-node"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Ainda não verificado</span></div>
+      <div class="acoes"><button class="btn btn-mini" id="btn-cx-node" type="button">Site do Node.js</button></div>
+    </div></li>
+    <li class="passo"><span class="passo-num">2</span><div class="passo-corpo">
+      <h2>Codex instalado</h2>
+      <div class="status" id="st-cx-instalado"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Ainda não verificado</span></div>
+      <div id="cx-ajuda-instalar" hidden>
+        <p>Clique em <b>Instalar Codex</b>. Abre uma janela preta que instala o Node.js (se faltar) e o Codex oficial da OpenAI. Quando terminar, o plugin abre o login sozinho.</p>
+        <div class="acoes"><button class="btn btn-primario" id="btn-cx-instalar" type="button">Instalar Codex</button><button class="btn" id="btn-cx-copiar" type="button">Copiar comando</button></div>
+        <p class="nota">Para fazer à mão: abra o PowerShell e rode <code>npm install -g @openai/codex</code></p>
+      </div>
+    </div></li>
+    <li class="passo"><span class="passo-num">3</span><div class="passo-corpo">
+      <h2>Login na sua conta do ChatGPT</h2>
+      <div class="status" id="st-cx-login"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Aguardando o passo 2</span></div>
+      <div id="cx-ajuda-login" hidden>
+        <p>Clique em <b>Fazer login</b>. Abre uma janela preta e depois o navegador: entre com a sua conta do ChatGPT (precisa de um plano que inclua o Codex) e autorize. Depois feche a janela preta.</p>
+        <div class="acoes"><button class="btn btn-primario" id="btn-cx-login" type="button">Fazer login</button></div>
+      </div>
+    </div></li>
+    <li class="passo passo-final"><span class="passo-num">4</span><div class="passo-corpo">
+      <h2>Teste com o After</h2>
+      <p>O Codex vai ler o seu projeto aberto para provar que está tudo ligado. Gasta um pouquinho do limite do seu plano.</p>
+      <div class="status" id="st-cx-teste"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Aguardando os passos anteriores</span></div>
+      <div class="acoes"><button class="btn btn-primario" id="btn-cx-testar" type="button" disabled>Testar agora</button></div>
+    </div></li>
+  </ol>
+  <div class="rodape-acoes">
+    <button id="btn-cx-continuar" class="btn btn-primario btn-grande" type="button" disabled>Começar</button>
+    <button id="btn-cx-verificar" class="btn" type="button">Verificar de novo</button>
+    <button id="btn-cx-voltar" class="btn" type="button">Voltar</button>
+  </div>
+  <p class="nota" id="cx-caminho"></p>
+  <p class="nota">O Arcano Motion adiciona a conexão "arcano_motion" no arquivo de configuração do Codex (config.toml) e a desliga quando o painel fecha.</p>
+</section>
+
+<!-- ================= VERSÃO DO CLAUDE CODE ================= -->
+<section id="tela-versao" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1 id="versao-titulo">Conferindo o Claude Code</h1>
+  <p class="lead" id="versao-lead"></p>
+  <div class="status" id="st-versao"><span class="lampada" data-estado="verificando"></span><span class="status-texto">Conferindo se você está na versão mais nova...</span></div>
+  <div class="rodape-acoes" id="versao-acoes" hidden>
+    <button class="btn btn-primario btn-grande" id="btn-atualizar-cc" type="button">Atualizar agora</button>
+    <button class="btn" id="btn-versao-pular" type="button" hidden>Usar mesmo assim</button>
+  </div>
+</section>
+
+<!-- ================= SETUP: ASSINATURA (CLAUDE CODE) ================= -->
+<section id="tela-assinatura" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1>Conectar sua assinatura</h1>
+  <p class="lead">O Arcano Motion conversa com o Claude pelo Claude Code instalado no seu computador. Clique no botão do passo 1: o plugin instala, abre o login e testa sozinho. Cada bolinha fica verde quando estiver certo. Precisa de uma assinatura Claude Pro, Max ou Team.</p>
+
+  <ol class="passos">
+    <li class="passo">
+      <span class="passo-num">1</span>
+      <div class="passo-corpo">
+        <h2>Claude Code instalado</h2>
+        <div class="status" id="st-instalado"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Ainda não verificado</span></div>
+        <div id="ajuda-instalar" hidden>
+          <p>Clique em <b>Instalar Claude Code</b>. Abre uma janela preta com o instalador oficial da Anthropic (não precisa ser administrador). Quando terminar, o plugin abre o login sozinho.</p>
+          <div class="acoes">
+            <button class="btn btn-primario" id="btn-instalar-cc" type="button">Instalar Claude Code</button>
+            <button class="btn" id="btn-copiar-cmd" type="button">Copiar comando</button>
+          </div>
+          <p class="nota">Para fazer à mão: abra o PowerShell e cole <code id="cmd-instalar">irm https://claude.ai/install.ps1 | iex</code></p>
+        </div>
+      </div>
+    </li>
+    <li class="passo">
+      <span class="passo-num">2</span>
+      <div class="passo-corpo">
+        <h2>Login na sua conta Claude</h2>
+        <div class="status" id="st-login"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Aguardando o passo 1</span></div>
+        <div id="ajuda-login" hidden>
+          <p>Clique em <b>Fazer login</b>. Abre uma janela preta e depois o navegador. Entre com a <b>mesma conta do seu plano Pro ou Max</b> e autorize. Quando confirmar, feche a janela preta e volte aqui.</p>
+          <div class="acoes"><button class="btn btn-primario" id="btn-login-cc" type="button">Fazer login</button></div>
+        </div>
+        <div class="acoes" id="trocar-conta-cc" hidden><button class="btn btn-mini" id="btn-trocar-conta-cc" type="button">Entrar com outra conta do Claude</button>
+        </div>
+      </div>
+    </li>
+    <li class="passo passo-final">
+      <span class="passo-num">3</span>
+      <div class="passo-corpo">
+        <h2>Teste com o After</h2>
+        <p>O Claude vai ler o seu projeto aberto para provar que está tudo ligado. Gasta um pouquinho do limite do seu plano.</p>
+        <div class="status" id="st-teste"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Aguardando os passos 1 e 2</span></div>
+        <div class="acoes"><button class="btn btn-primario" id="btn-testar-cc" type="button" disabled>Testar agora</button></div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="rodape-acoes">
+    <button id="btn-continuar-cc" class="btn btn-primario btn-grande" type="button" disabled>Começar</button>
+    <button id="btn-verificar-cc" class="btn" type="button">Verificar de novo</button>
+    <button class="btn" data-ir="tela-modo" type="button">Voltar</button>
+  </div>
+  <p class="nota" id="cc-caminho"></p>
+</section>
+
+<!-- ================= SETUP: CHAVE DE API ================= -->
+<section id="tela-api" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1>Conecte sua chave de API</h1>
+  <p class="lead">Leva uns 3 minutos e é feito uma vez só.</p>
+  <ol class="passos">
+    <li class="passo"><span class="passo-num">1</span><div class="passo-corpo">
+      <h2>Crie sua conta</h2>
+      <p>Entre no Console da Anthropic com seu e-mail ou conta Google. É diferente do site do Claude (claude.ai).</p>
+      <button class="btn btn-link" data-link="https://platform.claude.com/" type="button">Abrir Console</button>
+    </div></li>
+    <li class="passo"><span class="passo-num">2</span><div class="passo-corpo">
+      <h2>Adicione créditos</h2>
+      <p>Na página <b>Billing</b>, clique em <b>Buy credits</b>. Você paga só o que usar.</p>
+      <button class="btn btn-link" data-link="https://platform.claude.com/settings/billing" type="button">Abrir Billing</button>
+    </div></li>
+    <li class="passo"><span class="passo-num">3</span><div class="passo-corpo">
+      <h2>Crie a chave</h2>
+      <p>Na página <b>API Keys</b>, clique em <b>Create Key</b>, dê o nome <i>Arcano Motion</i> e copie. Ela começa com <code>sk-ant-</code> e só aparece uma vez.</p>
+      <button class="btn btn-link" data-link="https://platform.claude.com/settings/keys" type="button">Abrir API Keys</button>
+    </div></li>
+    <li class="passo passo-final"><span class="passo-num">4</span><div class="passo-corpo">
+      <h2>Cole a chave aqui</h2>
+      <div class="campo">
+        <input id="campo-chave" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-..." aria-label="Chave de API da Anthropic">
+        <button id="btn-mostrar" class="btn btn-campo" type="button">Mostrar</button>
+      </div>
+      <div class="acoes">
+        <button id="btn-colar" class="btn" type="button">Colar</button>
+        <button id="btn-verificar" class="btn btn-primario" type="button">Verificar chave</button>
+      </div>
+      <div class="status" id="status-chave" role="status" aria-live="polite"><span class="lampada" data-estado="vazio"></span><span class="status-texto">Nenhuma chave verificada ainda</span></div>
+    </div></li>
+  </ol>
+  <div class="rodape-acoes">
+    <button id="btn-continuar" class="btn btn-primario btn-grande" type="button" disabled>Começar</button>
+    <button class="btn" data-ir="tela-modo" type="button">Voltar</button>
+  </div>
+  <p class="nota">Sua chave fica salva só neste computador e só é enviada para a Anthropic.</p>
+</section>
+
+<!-- ================= CHAT ================= -->
+<section id="tela-chat" class="tela tela-chat" hidden>
+  <header class="topo-chat">
+    <div class="topo-linha">
+      <span class="marca-simbolo" aria-hidden="true"></span>
+      <div class="topo-titulo"><span class="aba-titulo" id="aba-titulo">Chat IA</span><span class="aba-desc" id="aba-desc"></span></div>
+      <button class="btn-plus-topo" id="btn-plus" type="button" hidden aria-label="Arcano+"><svg class="ic-plus" viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="grad-plus-topo" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b9a0ff"/><stop offset=".55" stop-color="#9d7cff"/><stop offset="1" stop-color="#ff5cc8"/></linearGradient></defs><rect x="1" y="1" width="22" height="22" rx="7" fill="url(#grad-plus-topo)"/><path d="M6.4 17.6 10.7 6.6h1.9l4.3 11" fill="none" stroke="#fff" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/><path d="M8.4 13.7h6.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M18.6 3.6v3.8M16.7 5.5h3.8" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/></svg></button>
+      <button class="chip-creditos" id="chip-creditos" type="button" hidden><span class="chip-ic" aria-hidden="true">&#9670;</span><span class="creditos-valor">—</span><span class="chip-mais" aria-hidden="true">+</span></button>
+      <span class="motor-topo" id="motor-topo"></span>
+      <span class="conexao" id="status-topo" role="status" title="Verificando..."><span class="lampada" data-estado="verificando"></span><span class="status-texto so-leitor">Verificando...</span></span>
+      <div class="menu">
+        <button class="btn-menu" id="btn-menu" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Menu" title="Menu">&#8943;</button>
+        <div class="menu-lista" id="menu-lista" role="menu" hidden>
+          <button class="menu-item" id="btn-nova" type="button" role="menuitem">Nova conversa</button>
+          <button class="menu-item" id="btn-config" type="button" role="menuitem">Ajustes</button>
+          <button class="menu-item" id="btn-suporte" type="button" role="menuitem">Suporte (WhatsApp)</button>
+          <button class="menu-item" id="btn-termos" type="button" role="menuitem">Termos e privacidade</button>
+        </div>
+      </div>
+    </div>
+    <div class="abas-caixa" id="abas-caixa">
+      <button class="abas-seta esq" id="abas-esq" type="button" aria-label="Ver abas anteriores" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg></button>
+      <nav class="abas" role="tablist" id="abas" aria-label="Ferramentas do Arcano Motion"></nav>
+      <button class="abas-seta dir" id="abas-dir" type="button" aria-label="Ver mais abas" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+    </div>
+    <!-- sub-abas do Parallax: Parallax, Pontos de foco e FX Câmera 3D -->
+    <nav class="sub-abas" id="sub-abas" role="tablist" aria-label="Parallax e câmera" hidden></nav>
+  </header>
+
+  <!-- aba Chat sem IA configurada: escolhe a IA aqui; as outras abas funcionam normal -->
+  <div class="chat-config" id="chat-config" hidden>
+    <h1>Configure a IA do chat</h1>
+    <p class="lead">Para usar o chat de IA, conecte o seu Claude ou o seu ChatGPT. É o jeito certo de usar: a conversa roda no seu plano e não gasta créditos do ArcanoApp.</p>
+
+    <button class="opcao opcao-motor opcao-recomendada" data-motor="claude" type="button">
+      <span class="motor-ic motor-ic-claude" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg></span>
+      <span class="opcao-corpo"><span class="opcao-titulo">Claude <span class="selo-recomendado">RECOMENDADO</span> <span class="motor-selo"></span></span>
+      <span class="opcao-texto">A IA que mais capricha nas animações. Usa a sua assinatura Claude (Pro, Max ou Team; o plano grátis não inclui) pelo Claude Code. A gente instala e conecta pra você em poucos cliques.</span></span>
+    </button>
+    <button class="opcao opcao-motor" data-motor="codex" type="button">
+      <span class="motor-ic motor-ic-codex" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14"/></svg></span>
+      <span class="opcao-corpo"><span class="opcao-titulo">Codex (ChatGPT) <span class="motor-selo"></span></span>
+      <span class="opcao-texto">Usa o seu plano do ChatGPT pelo Codex da OpenAI. A gente instala e conecta pra você em poucos cliques.</span></span>
+    </button>
+    <div class="ia-nativa-bloco">
+      <span class="ia-nativa-pergunta">Não tem Claude nem ChatGPT?</span>
+      <button class="btn btn-mini ia-nativa-btn" data-motor="arcano" type="button">Usar a IA nativa (gasta créditos)</button>
+    </div>
+    <div class="chat-config-voltar" id="chat-config-voltar" hidden><button class="link-inline" id="btn-config-voltar" type="button">Voltar para o chat</button></div>
+  </div>
+
+  <div class="mensagens" id="mensagens">
+    <div class="vazio" id="chat-vazio">
+      <p class="vazio-titulo">O que vamos animar?</p>
+      <p>Clique num exemplo ou escreva o seu:</p>
+      <button class="sugestao sugestao-destaque" type="button" data-preset="propor">Analisa toda a comp e as precomps e me propõe uma animação de 15s em beats para eu aprovar</button>
+      <button class="sugestao" type="button">O que tem nessa comp?</button>
+      <button class="sugestao" type="button">Pega a layer selecionada e faz ela balançar como se estivesse pendurada numa corrente, bem realista</button>
+      <button class="sugestao" type="button">Cria uma comp 1080x1920 com o texto PROMOÇÃO entrando de baixo com um quique</button>
+    </div>
+  </div>
+
+  <div class="painel-presets painel-aba" id="painel-presets" hidden>
+    <div class="pp-biblio">
+      <nav class="pp-pastas" id="pp-pastas" aria-label="Categorias de presets"></nav>
+      <div class="pp-conteudo">
+        <div class="pp-topo" id="pp-topo"></div>
+        <div class="grade-presets" id="grade-presets"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monte sua animação (sub-aba de Presets): montado em app.js -->
+  <div class="painel-montar painel-aba" id="painel-montar" hidden></div>
+
+  <div class="painel-ia painel-aba" id="painel-ia" hidden>
+    <div class="ia-conexao" id="ia-conexao">
+      <span class="lampada" data-estado="vazio"></span>
+      <span class="ia-conexao-txt" id="ia-conexao-txt">Conta ArcanoApp</span>
+      <span class="ia-saldo"><b class="creditos-valor">—</b> créditos</span>
+      <button class="btn btn-mini" id="ia-btn-comprar" type="button">Comprar créditos</button>
+    </div>
+
+    <div class="ia-passo"><span class="ia-num">1</span><span class="ia-passo-titulo">Qual imagem animar?</span></div>
+    <div class="ia-origem ia-cartoes" role="radiogroup" aria-label="Imagem de origem">
+      <label><input type="radio" name="ia-origem" value="camada" checked><span>Camada selecionada</span></label>
+      <label><input type="radio" name="ia-origem" value="frame"><span>Frame da comp</span></label>
+    </div>
+    <div class="ia-selecao" id="ia-selecao"><span class="lampada" data-estado="verificando"></span><span id="ia-selecao-txt">Clique numa camada de imagem na timeline</span></div>
+
+    <div class="ia-passo"><span class="ia-num">2</span><label class="ia-passo-titulo" for="ia-prompt">O que acontece no vídeo?</label></div>
+    <textarea id="ia-prompt" class="ia-texto" rows="4" placeholder="Ex.: a câmera se aproxima devagar e o cabelo dela balança com o vento."></textarea>
+
+    <div class="ia-passo"><span class="ia-num">3</span><span class="ia-passo-titulo">Duração e qualidade</span></div>
+    <div class="ia-ajuste">
+      <div class="ia-ajuste-topo"><span>Duração</span></div>
+      <div class="ia-dur"><input type="range" id="ia-duracao-slider" min="1" max="15" step="1" value="6" aria-label="Duração"><b id="ia-duracao-valor">6 s</b></div>
+      <select id="ia-duracao" hidden></select>
+    </div>
+    <div class="ia-ajuste">
+      <div class="ia-ajuste-topo"><span>Qualidade</span></div>
+      <select id="ia-resolucao" data-segmentar="1"><option value="480p" data-dica="mais barato">480p</option><option value="720p" selected>720p</option><option value="1080p" data-dica="melhor">1080p</option></select>
+    </div>
+
+    <div class="ia-final">
+      <p class="ia-custo" id="ia-custo"></p>
+      <button class="btn btn-primario ia-gerar" id="ia-btn-gerar" type="button">Gerar vídeo</button>
+    </div>
+
+    <h2 class="secao" id="ia-titulo-lista" hidden>Gerações</h2>
+    <p class="nota" id="ia-nota-prazo" hidden></p>
+    <div class="ia-lista" id="ia-lista"></div>
+  </div>
+  <div class="painel-ia painel-img painel-aba" id="painel-img" hidden>
+    <div class="ia-passo"><span class="ia-num">1</span><span class="ia-passo-titulo">O que você quer fazer?</span></div>
+    <div class="ia-origem ia-cartoes" role="radiogroup" aria-label="O que fazer">
+      <label><input type="radio" name="img-modo" value="editar" checked><span>Editar a camada</span></label>
+      <label><input type="radio" name="img-modo" value="nova"><span>Criar do zero</span></label>
+    </div>
+    <div class="ia-selecao" id="img-selecao"><span class="lampada" data-estado="verificando"></span><span id="img-selecao-txt">Clique numa camada de imagem na timeline</span></div>
+
+    <div class="ia-passo"><span class="ia-num">2</span><label class="ia-passo-titulo" for="img-prompt" id="img-rotulo-prompt">O que mudar na imagem</label></div>
+    <textarea id="img-prompt" class="ia-texto" rows="4" maxlength="20000" placeholder="Ex.: troque o fundo por um palco com luzes roxas, mantenha a pessoa igual."></textarea>
+
+    <div class="img-refs">
+      <label class="img-refs-add" for="img-arquivos" id="img-btn-refs"><span aria-hidden="true">+</span> Adicionar imagens de referência <span class="img-refs-cont" id="img-refs-cont"></span></label>
+      <input type="file" id="img-arquivos" accept="image/png,image/jpeg,image/webp" multiple hidden>
+      <div class="img-refs-lista" id="img-refs-lista"></div>
+      <p class="nota" id="img-refs-nota" hidden></p>
+    </div>
+
+    <div class="ia-passo"><span class="ia-num">3</span><span class="ia-passo-titulo">Formato</span></div>
+    <div class="ia-ajuste">
+      <div class="ia-ajuste-topo"><span>Qualidade</span></div>
+      <select id="img-resolucao" data-segmentar="1"><option value="1K" selected>1K</option><option value="2K">2K</option><option value="4K">4K</option></select>
+    </div>
+    <div class="ia-ajuste">
+      <div class="ia-ajuste-topo"><span>Proporção</span></div>
+      <select id="img-proporcao" data-segmentar="5"><option value="auto" selected>Auto</option><option value="1:1">1:1</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="4:5">4:5</option><option value="3:2">3:2</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="2:3">2:3</option><option value="21:9">21:9</option><option value="9:21">9:21</option><option value="5:4">5:4</option><option value="2:1">2:1</option><option value="1:2">1:2</option></select>
+    </div>
+    <div class="ia-ajuste">
+      <div class="ia-ajuste-topo"><span>Fundo</span></div>
+      <select id="img-fundo" data-segmentar="1"><option value="auto" selected>Auto</option><option value="transparent">Transparente</option><option value="opaque">Opaco</option></select>
+    </div>
+    <p class="nota ia-aviso" id="img-aviso" hidden></p>
+
+    <div class="ia-final">
+      <p class="ia-custo" id="img-custo"></p>
+      <button class="btn btn-primario ia-gerar" id="img-btn-gerar" type="button">Gerar imagem</button>
+    </div>
+
+    <h2 class="secao" id="img-titulo-lista" hidden>Imagens geradas</h2>
+    <p class="nota" id="img-nota-prazo" hidden></p>
+    <div class="ia-lista ia-lista-img" id="img-lista"></div>
+  </div>
+
+
+  <!-- Arcano Design: separar uma imagem em camadas editáveis (o mesmo motor do Arcano Layers) -->
+  <div class="painel-ia painel-camadas painel-aba" id="painel-camadas" hidden>
+    <div class="rh-topo"><button class="btn btn-mini" type="button" id="sep-voltar">&#8592; Ferramentas</button></div>
+    <div class="sep-cabeca">
+      <span class="sep-cabeca-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l9 4.5-9 4.5-9-4.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5l9 4.5 9-4.5"/></svg></span>
+      <div><b>Separar em camadas</b><small>A IA separa a imagem em camadas editáveis, com nome, no mesmo documento.</small></div>
+    </div>
+    <div class="sep-palco" id="sep-palco">
+      <div class="sep-previa" id="sep-previa" hidden><img id="sep-previa-img" alt=""></div>
+      <div class="sep-vazio" id="sep-vazio"><div class="sep-pilha" aria-hidden="true"><i></i><i></i><i></i></div><span>Clique numa camada de imagem no painel Camadas do Photoshop</span></div>
+      <div class="ia-selecao sep-selecao" id="sep-selecao"><span class="lampada" data-estado="verificando"></span><span id="sep-selecao-txt">Clique numa camada de imagem no painel Camadas</span></div>
+    </div>
+
+    <ol class="sep-passos" id="sep-passos">
+      <li><b>1</b><span id="sep-p1">Escolha a imagem</span></li>
+      <li><b>2</b><span id="sep-p2">A IA separa cada elemento</span></li>
+      <li><b>3</b><span id="sep-p3">Camadas com nome, no lugar</span></li>
+    </ol>
+
+    <div class="sep-final">
+      <button class="btn btn-primario ia-gerar sep-gerar" id="sep-btn" type="button"><span class="sep-btn-txt">Separar em camadas</span><span class="sep-btn-cred" id="sep-btn-cred"></span></button>
+      <p class="ia-custo" id="sep-custo"></p>
+    </div>
+
+    <button class="sep-config-btn" id="sep-config-btn" type="button" aria-expanded="false" aria-controls="sep-config"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Configurações avançadas</span><span class="sep-config-seta" aria-hidden="true">&#9662;</span></button>
+    <div class="sep-config" id="sep-config" hidden>
+      <label class="sep-rot" for="sep-pedido">O que separar <small class="sep-opcional">(opcional)</small></label>
+      <input class="campo-solo" id="sep-pedido" type="text" maxlength="200" placeholder="Ex.: só a pessoa (vazio = tudo)" autocomplete="off">
+      <span class="sep-rot">Qualidade</span>
+      <div class="ia-cartoes sep-qual" role="radiogroup" aria-label="Qualidade">
+        <label><input type="radio" name="sep-q" value="1K" checked><span><b>1K</b><small>50 a 400 créditos</small></span></label>
+        <label><input type="radio" name="sep-q" value="2K"><span><b>2K</b><small>100 a 800 créditos</small></span></label>
+      </div>
+      <select id="sep-qualidade" hidden><option value="1K" selected>1K</option><option value="2K">2K</option></select>
+      <label class="sep-check"><input type="checkbox" id="sep-textos"><span>Deixar os textos editáveis</span></label>
+    </div>
+
+    <h2 class="secao" id="sep-titulo-lista" hidden>Separações</h2>
+    <div class="ia-lista" id="sep-lista"></div>
+  </div>
+
+  <div class="painel-ia painel-aud painel-aba" id="painel-aud" hidden>
+    <div class="ia-passo"><span class="ia-num">1</span><span class="ia-passo-titulo">O que você quer gerar?</span></div>
+    <div class="ia-origem ia-cartoes" role="radiogroup" aria-label="Tipo de áudio">
+      <label><input type="radio" name="aud-modo" value="narracao" checked><span>Narração</span></label>
+      <label><input type="radio" name="aud-modo" value="trilha"><span>Trilha sonora</span></label>
+    </div>
+
+    <div id="aud-bloco-narr">
+      <div class="ia-passo"><span class="ia-num">2</span><label class="ia-passo-titulo" for="aud-texto">O que a voz vai falar</label></div>
+      <div class="aud-texto-caixa">
+        <textarea id="aud-texto" class="ia-texto" rows="5" maxlength="5000" placeholder="Ex.: Sexta-feira tem o maior show do ano! Ingressos no link da bio. &lt;short pause&gt; Garanta o seu!"></textarea>
+        <span class="aud-contador" id="aud-contador">0 / 5000</span>
+      </div>
+
+      <div class="ia-passo"><span class="ia-num">3</span><span class="ia-passo-titulo">Qual voz</span></div>
+      <button class="aud-clonar-cartao" type="button" id="aud-clonar-abrir" hidden>
+        <span class="aud-clonar-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></span>
+        <span class="aud-clonar-txt"><b>Usar minha voz clonada</b><small id="aud-clonar-status">Clone a sua voz com a ElevenLabs v4 (teste, só admin)</small></span>
+        <span class="aud-clonar-seta" aria-hidden="true">›</span>
+      </button>
+      <div class="aud-campo">
+        <label class="aud-rotulo" for="aud-voz">Voz da narração</label>
+        <select id="aud-voz"></select>
+      </div>
+      <div class="aud-minha" id="aud-minha" hidden>
+        <div class="aud-minha-linha"><span class="aud-minha-ic" aria-hidden="true">●</span><span class="nota" id="aud-minha-txt"></span></div>
+        <div class="aud-minha-acoes"><button class="btn btn-mini btn-primario" type="button" id="aud-minha-gravar">Gravar minha voz</button><button class="btn btn-mini" type="button" id="aud-minha-apagar" hidden>Apagar</button></div>
+        <label class="aud-minha-motor" id="aud-minha-motor-caixa" hidden><span class="nota">Motor da voz (teste, só admin)</span><select id="aud-minha-motor"><option value="">Padrão do servidor</option><option value="eleven">ElevenLabs v4 (voz da tela Clonar)</option><option value="google">Google (Gemini 3.8 Lite, kie)</option><option value="evolink">Qwen 3.1 (Evolink)</option></select></label>
+      </div>
+      <div class="aud-campo">
+        <label class="aud-rotulo" for="aud-estilo">Jeito de falar <span class="aud-opc">opcional</span></label>
+        <input id="aud-estilo" class="ia-texto ia-linha" type="text" maxlength="500" placeholder="Ex.: locutor de festa animado, enérgico, sotaque brasileiro">
+      </div>
+    </div>
+
+    <div id="aud-bloco-trilha" hidden>
+      <div class="ia-passo"><span class="ia-num">2</span><label class="ia-passo-titulo" for="aud-trilha-estilo">Estilo da música</label></div>
+      <textarea id="aud-trilha-estilo" class="ia-texto" rows="3" maxlength="1000" placeholder="Ex.: energetic EDM festival build-up, 128 BPM, punchy drums, big drop"></textarea>
+      <div class="ia-ajuste">
+        <div class="ia-ajuste-topo"><label for="aud-duracao">Duração (segundos)</label></div>
+        <input id="aud-duracao" class="ia-texto ia-linha" type="number" min="10" max="360" step="1" value="30">
+      </div>
+      <div class="ia-ajuste">
+        <div class="ia-ajuste-topo"><span>Versão do Suno</span></div>
+        <select id="aud-versao" data-segmentar="1"><option value="V6" selected>V6</option><option value="V6_MINI">V6 Mini</option><option value="V6_WILD">V6 Wild</option></select>
+      </div>
+      <label class="ia-check"><input type="checkbox" id="aud-instrumental" checked> Só instrumental (sem voz cantando)</label>
+      <div id="aud-letra-caixa" hidden>
+        <textarea id="aud-letra" class="ia-texto" rows="4" maxlength="5000" placeholder="Letra da música ([Verse], [Chorus]...)"></textarea>
+      </div>
+    </div>
+
+    <div class="ia-passo"><span class="ia-num" id="aud-num-inicio">4</span><span class="ia-passo-titulo">Onde começa na comp</span></div>
+    <div class="ia-origem ia-cartoes" role="radiogroup" aria-label="Onde começa">
+      <label><input type="radio" name="aud-inicio" value="zero" checked><span>No início da comp</span></label>
+      <label><input type="radio" name="aud-inicio" value="atual"><span>No tempo atual</span></label>
+    </div>
+
+    <div class="ia-final">
+      <p class="ia-custo" id="aud-custo"></p>
+      <button class="btn btn-primario ia-gerar" id="aud-btn-gerar" type="button">Gerar narração</button>
+    </div>
+
+    <h2 class="secao" id="aud-titulo-lista" hidden>Áudios gerados</h2>
+    <p class="nota" id="aud-nota-prazo" hidden></p>
+    <div class="ia-lista ia-lista-aud" id="aud-lista"></div>
+  </div>
+
+  <div class="painel-aba painel-clonar" id="painel-clonar" hidden>
+    <button class="btn btn-mini clv-voltar" type="button" id="clv-voltar">← Áudio IA</button>
+    <div class="clv-topo">
+      <div class="clv-topo-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg></div>
+      <div><h2 class="clv-titulo">Clonar minha voz</h2><p class="clv-sub">ElevenLabs v4 · grave ou envie de 1 a 2 minutos da sua voz</p></div>
+    </div>
+
+    <div class="clv-pronta" id="clv-pronta" hidden>
+      <div class="clv-pronta-ic" aria-hidden="true">✓</div>
+      <div class="clv-pronta-txt"><b>Sua voz clonada está salva</b><small>Use "Minha voz" na aba Áudio IA. Gravar de novo troca a voz.</small></div>
+      <div class="clv-pronta-acoes"><button class="btn btn-mini btn-primario" type="button" id="clv-usar">Usar agora</button><button class="btn btn-mini" type="button" id="clv-apagar">Apagar</button></div>
+    </div>
+
+    <div class="clv-medidor" id="clv-medidor">
+      <svg class="clv-gauge" viewBox="0 0 220 128" aria-hidden="true">
+        <defs><linearGradient id="clv-grad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff5d6c"/><stop offset=".45" stop-color="#e9b44c"/><stop offset=".75" stop-color="#46d68a"/><stop offset="1" stop-color="#46d68a"/></linearGradient></defs>
+        <path class="clv-arco-fundo" d="M20 110 A90 90 0 0 1 200 110"/>
+        <path class="clv-arco" id="clv-arco" d="M20 110 A90 90 0 0 1 200 110" stroke="url(#clv-grad)"/>
+        <g id="clv-ticks"></g>
+        <line class="clv-agulha" id="clv-agulha" x1="110" y1="110" x2="110" y2="34"/>
+        <circle class="clv-pino" cx="110" cy="110" r="7"/>
+      </svg>
+      <div class="clv-nota"><span class="clv-nota-num" id="clv-nota">0</span><span class="clv-nota-txt" id="clv-nota-txt">Adicione a sua voz</span></div>
+      <div class="clv-checks">
+        <div class="clv-check" id="clv-c-dur"><span class="clv-luz"></span><span class="clv-c-nome">Duração</span><span class="clv-c-val">0:00</span><span class="clv-c-meta">ideal 1 a 2 min</span></div>
+        <div class="clv-check" id="clv-c-vol"><span class="clv-luz"></span><span class="clv-c-nome">Volume</span><span class="clv-c-val">—</span><span class="clv-c-meta">−23 a −18 dB</span></div>
+        <div class="clv-check" id="clv-c-pico"><span class="clv-luz"></span><span class="clv-c-nome">Pico</span><span class="clv-c-val">—</span><span class="clv-c-meta">até −3 dB</span></div>
+        <div class="clv-check" id="clv-c-ruido"><span class="clv-luz"></span><span class="clv-c-nome">Ruído</span><span class="clv-c-val">—</span><span class="clv-c-meta">abaixo de −60 dB</span></div>
+      </div>
+    </div>
+
+    <div class="clv-entrada">
+      <div class="clv-gravar-caixa" id="clv-gravar-caixa">
+        <button class="clv-rec" type="button" id="clv-rec" aria-label="Gravar"><span class="clv-rec-bola"></span></button>
+        <div class="clv-rec-info">
+          <b id="clv-rec-titulo">Gravar agora</b>
+          <small id="clv-rec-dica">Fale de 1 a 2 minutos, perto do microfone, num lugar silencioso.</small>
+          <div class="clv-nivel"><div class="clv-nivel-barra" id="clv-nivel"></div><span class="clv-nivel-alvo"></span></div>
+        </div>
+        <span class="clv-rec-tempo" id="clv-rec-tempo"></span>
+      </div>
+      <div class="clv-soltar" id="clv-soltar" tabindex="0" role="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <span><b>Enviar arquivos de áudio</b><small>Clique ou arraste aqui · MP3, WAV, M4A · até 3 min no total</small></span>
+      </div>
+    </div>
+
+    <details class="clv-roteiro">
+      <summary>Sem ideia do que falar? Leia este texto</summary>
+      <p id="clv-roteiro-txt" data-no-tr></p>
+    </details>
+
+    <h3 class="clv-sec">Amostras <span id="clv-total"></span></h3>
+    <div class="clv-lista" id="clv-lista"><p class="nota clv-vazio">Nenhuma amostra ainda. Grave ou envie um áudio.</p></div>
+
+    <div class="clv-dicas">
+      <b>Para a clonagem sair boa</b>
+      <ul>
+        <li>Só a sua voz: sem música, eco, TV ou outra pessoa falando.</li>
+        <li>Mesmo microfone e o mesmo jeito de falar em todas as amostras.</li>
+        <li>Fale do jeito que quer ouvir depois (animado, calmo, locutor...).</li>
+        <li>1 a 2 minutos é o ideal; mais de 3 minutos não ajuda.</li>
+      </ul>
+    </div>
+
+    <label class="clv-opcao"><input type="checkbox" id="clv-sem-ruido"> <span><b>Remover ruído de fundo</b><small>Use só se a gravação tiver barulho: em áudio limpo pode piorar a voz.</small></span></label>
+    <label class="clv-opcao"><input type="checkbox" id="clv-consentimento"> <span><b>Esta voz é minha</b><small>Confirmo que a voz é minha (ou tenho autorização do dono) e autorizo a clonagem para usar no Arcano Motion.</small></span></label>
+
+    <div class="clv-final">
+      <button class="btn btn-primario clv-salvar" type="button" id="clv-salvar" disabled>Clonar minha voz</button>
+      <p class="nota clv-msg" id="clv-msg"></p>
+    </div>
+  </div>
+
+  <!-- ===== v0.7: novas abas ===== -->
+  <div class="painel-aba painel-ferramentas" id="painel-ferramentas" hidden>
+    <div id="lista-ferramentas"></div>
+    <p class="nota dica-clique" id="dica-ferramentas">Clique num efeito para ver a prévia e ajustar. <b>Clique direito</b> aplica direto com as últimas opções. Ctrl+Z no After desfaz tudo de uma vez.</p>
+    <div class="ferr-detalhe" id="ferr-detalhe" hidden></div>
+  </div>
+
+  <!-- Photoshop: aba Ferramentas (as ferramentas do ArcanoApp na camada selecionada) -->
+  <div class="painel-aba painel-ferramentas painel-efeitos-ps" id="painel-efeitos-ps" hidden>
+    <div id="lista-efeitos-ps"></div>
+  </div>
+  <!-- Photoshop: aba Presets (pedidos prontos para a IA do chat) -->
+  <div class="painel-aba painel-ferramentas painel-presets-ps" id="painel-presets-ps" hidden>
+    <div id="lista-presets-ps"></div>
+  </div>
+
+  <div class="painel-aba painel-editar" id="painel-editar" hidden>
+    <div class="editar-camada vazio" id="editar-camada">Clique numa camada na timeline para ver os efeitos do Arcano nela.</div>
+    <div class="editar-lista" id="editar-lista"></div>
+    <p class="nota">Todo efeito, ferramenta ou animação do Arcano aplicado na camada aparece aqui. Clique para mudar as configurações (o efeito é refeito por cima, sem duplicar) ou para remover. No Desfoque, selecione a camada "Arcano Desfoque".</p>
+  </div>
+
+  <div class="painel-aba painel-animar" id="painel-animar" hidden>
+    <div class="pp-biblio mv-biblio">
+      <nav class="pp-pastas mv-pastas" id="mv-pastas" aria-label="Pastas de animações"></nav>
+      <div class="pp-conteudo">
+        <div class="pp-topo" id="mv-topo"></div>
+        <div class="grade-animar mv-grade" id="grade-animar"></div>
+        <p class="nota">Passe o mouse para ver. <b>Clique</b> para abrir as opções; <b>botão direito</b> aplica direto. Tudo começa na agulha e fica na aba Editar para mudar ou remover.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="painel-aba painel-foco" id="painel-foco" hidden>
+    <div class="foco-mapa" id="foco-mapa" hidden></div>
+  </div>
+
+  <div class="painel-aba painel-camera" id="painel-camera" hidden>
+    <div class="grade-ferr grade-camera" id="grade-camera"></div>
+    <p class="nota">Passe o mouse num movimento para ver o que ele faz. Os keyframes ficam no nulo "CAM CTRL".</p>
+  </div>
+
+  <div class="painel-aba painel-parallax" id="painel-parallax" hidden>
+    <div class="cartao-bloco px-bloco">
+      <div class="bloco-titulo">Profundidade entre as camadas</div>
+      <svg class="px-lado" id="px-lado" viewBox="0 0 320 150" aria-label="Esquema visto de lado: câmera e camadas"></svg>
+      <label class="px-slider"><input id="parallax-slider" type="range" min="10" max="1000" step="10" value="200" aria-label="Intensidade"><span class="px-escala"><span>mais perto</span><span>mais longe</span></span></label>
+      <div class="chips" id="parallax-chips"></div>
+      <label class="campo-mini largo">Valor exato <input id="parallax-valor" type="number" min="0.1" max="999.9" step="0.1" value="200"><span>%</span></label>
+      <p class="nota px-legenda" id="px-legenda"></p>
+    </div>
+    <div class="cartao-bloco">
+      <label class="campo-mini largo">Movimento <select id="parallax-movimento"><option value="aproximar">Câmera aproxima devagar</option><option value="lateral">Câmera anda de lado</option><option value="nenhum">Sem movimento</option></select></label>
+    </div>
+    <div class="acoes">
+      <button class="btn btn-primario btn-icone" id="parallax-aplicar" type="button"></button>
+      <button class="btn btn-icone" id="parallax-remover" type="button"></button>
+    </div>
+    <p class="nota">Liga o 3D nas camadas da comp aberta (e dentro das precomps que já têm Collapse — o Collapse nunca é mexido) e afasta só as camadas dessa comp, corrigindo posição e escala (dentro de cada precomp fica tudo junto, no plano dela): parado, o quadro fica idêntico e a profundidade aparece quando a câmera se mexe. Começa tudo nítido, sem desfoque: o desfoque de cada parada você escolhe na aba Câmera &gt; Pontos de foco. Remover devolve tudo como estava.</p>
+  </div>
+
+  <div class="painel-aba painel-curvas" id="painel-curvas" hidden>
+    <div class="curva-area">
+      <svg class="curva-grafico" id="curva-grafico" viewBox="-12 -12 224 224" aria-label="Gráfico da curva">
+        <rect x="0" y="0" width="200" height="200" rx="6" class="cg-fundo"/>
+        <path d="M0 50H200M0 100H200M0 150H200M50 0V200M100 0V200M150 0V200" class="cg-grade"/>
+        <line id="cg-h1" class="cg-haste"/><line id="cg-h2" class="cg-haste"/>
+        <path id="cg-curva" class="cg-curva"/>
+        <circle id="cg-p1" class="cg-ponto" r="7"/><circle id="cg-p2" class="cg-ponto" r="7"/>
+      </svg>
+      <div class="curva-controles">
+        <label class="campo-mini largo">Saída <input id="curva-saida" type="range" min="0.1" max="100" step="0.1" value="75"><b id="curva-saida-v">75</b></label>
+        <label class="campo-mini largo">Entrada <input id="curva-entrada" type="range" min="0.1" max="100" step="0.1" value="75"><b id="curva-entrada-v">75</b></label>
+        <div class="chips" id="curva-chips"></div>
+      </div>
+    </div>
+    <div class="acoes">
+      <button class="btn btn-primario" id="curva-aplicar" type="button">Aplicar nos keyframes</button>
+      <button class="btn" id="curva-ler" type="button">Ler do keyframe</button>
+      <button class="btn" id="curva-inverter" type="button">Inverter</button>
+      <button class="btn" id="curva-salvar" type="button">Salvar curva</button>
+    </div>
+    <div class="bloco-titulo" id="curva-fav-titulo" hidden>Curvas salvas</div>
+    <div class="chips" id="curva-favoritas"></div>
+    <p class="nota">Selecione keyframes na timeline e aplique. Saída = quanto o movimento demora a arrancar; entrada = quanto ele freia ao chegar.</p>
+  </div>
+
+  <div class="painel-aba painel-biblioteca" id="painel-biblioteca" hidden>
+    <!-- Sons, Transições, Textos e Assets (pastas do próprio usuário) ocultos por enquanto: pedido do dono, 16/10/2026 -->
+    <div class="segmentado largo" role="tablist" id="bib-tipos">
+      <button type="button" role="tab" data-tipo="drive" aria-checked="true">Efeitos</button>
+      <button type="button" role="tab" data-tipo="sfx" aria-checked="false">Sound Effects</button>
+      <button type="button" role="tab" data-tipo="sons" aria-checked="false" hidden>Sons</button>
+      <button type="button" role="tab" data-tipo="transicoes" aria-checked="false" hidden>Transições</button>
+      <button type="button" role="tab" data-tipo="textos" aria-checked="false" hidden>Textos</button>
+      <button type="button" role="tab" data-tipo="assets" aria-checked="false" hidden>Assets</button>
+    </div>
+    <div class="bib-drive-topo" id="bib-drive-topo">
+      <div class="bib-trilha" id="bib-trilha"></div>
+      <button class="btn btn-mini" id="bib-drive-atualizar" type="button" title="Ler a pasta de novo">Atualizar</button>
+    </div>
+    <div class="bib-pasta" id="bib-pasta-propria" hidden>
+      <span class="bib-caminho" id="bib-caminho">Nenhuma pasta escolhida</span>
+      <button class="btn btn-mini" id="bib-escolher" type="button">Escolher pasta</button>
+      <button class="btn btn-mini" id="bib-atualizar" type="button" title="Ler a pasta de novo">Atualizar</button>
+    </div>
+    <div class="bib-manual" id="bib-manual" hidden>
+      <div class="campo"><input id="bib-campo" type="text" spellcheck="false" placeholder="Cole o caminho da pasta"><button class="btn btn-campo" id="bib-usar" type="button">Usar</button></div>
+    </div>
+    <label class="bib-busca-caixa" for="bib-busca"><svg class="bib-lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input class="campo-solo bib-busca" id="bib-busca" type="search" placeholder="Buscar efeito pelo nome..." autocomplete="off"></label>
+    <div class="bib-categorias chips" id="bib-categorias"></div>
+    <div class="bib-lista" id="bib-lista"></div>
+    <p class="nota" id="bib-nota"></p>
+  </div>
+
+  <!-- Arcano Design (Photoshop): Biblioteca de Artes Arcanas -->
+  <div class="painel-aba painel-artes" id="painel-artes" hidden>
+    <div class="ia-seg artes-filtro" role="tablist" aria-label="Quais artes mostrar">
+      <button class="ia-seg-op ativo" type="button" role="tab" data-filtro="minhas"><span>Minhas artes</span><small id="artes-n-minhas"></small></button>
+      <button class="ia-seg-op" type="button" role="tab" data-filtro="todas"><span>Todas</span><small id="artes-n-todas"></small></button>
+    </div>
+    <div class="artes-busca-linha">
+      <label class="bib-busca-caixa" for="artes-busca"><svg class="bib-lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><input class="campo-solo bib-busca" id="artes-busca" type="search" placeholder="Buscar arte ou pack..." autocomplete="off"></label>
+      <select id="artes-categoria" aria-label="Categoria"><option value="">Categorias</option></select>
+    </div>
+    <div class="artes-aviso" id="artes-aviso" hidden></div>
+    <p class="nota artes-status" id="artes-status"></p>
+    <div class="artes-grade" id="artes-grade"></div>
+    <div class="acoes artes-mais"><button class="btn btn-mini" id="artes-mais" type="button" hidden>Carregar mais</button></div>
+    <p class="nota artes-rodape">Clique numa arte sua: o PSD é baixado do Drive e abre no Photoshop (uma cópia nova em Documentos &gt; Arcano Design &gt; Artes). Todas as artes vêm no Plano Completo do plugin, enquanto ele estiver ativo.</p>
+  </div>
+
+  <div class="painel-aba painel-conta" id="painel-conta" hidden>
+    <div class="cartao-bloco cartao-conta">
+      <div class="bloco-titulo">Conta ArcanoApp</div>
+      <div class="linha-info"><span class="lampada" data-estado="ok"></span><span id="conta-app-email"></span></div>
+      <div class="conta-saldo"><span class="chip-ic" aria-hidden="true">&#9670;</span><b class="creditos-valor">—</b><span>créditos</span></div>
+      <div class="linha-info"><span id="conta-app-pc"></span></div>
+      <div class="acoes"><button class="btn btn-mini btn-primario" id="conta-comprar" type="button">Comprar créditos</button><button class="btn btn-mini" id="conta-site" type="button">Abrir o ArcanoApp</button><button class="btn btn-mini" id="conta-sair" type="button">Sair deste PC</button></div>
+    </div>
+    <div class="cartao-bloco" id="conta-idioma">
+      <div class="bloco-titulo">Idioma</div>
+      <div class="idiomas" data-no-tr role="group" aria-label="Idioma / Language / Idioma">
+        <button class="idioma-op" type="button" data-idioma="pt">Português</button><button class="idioma-op" type="button" data-idioma="en">English</button><button class="idioma-op" type="button" data-idioma="es">Español</button>
+      </div>
+    </div>
+    <div class="cartao-bloco cartao-plus" id="conta-plus">
+      <div class="bloco-titulo">Seu acesso</div>
+      <div class="linha-info"><span id="conta-plus-status"></span></div>
+      <div class="acoes" id="conta-plus-acoes"></div>
+    </div>
+    <div class="cartao-bloco" id="conta-remoto">
+      <div class="bloco-titulo">Controle remoto pelo celular</div>
+      <div class="linha-info"><span id="conta-remoto-status"></span></div>
+      <div class="acoes"><button class="btn btn-mini btn-primario" id="conta-remoto-btn" type="button">Ligar controle remoto</button></div>
+    </div>
+    <div class="cartao-bloco">
+      <div class="bloco-titulo">Motor de IA do chat</div>
+      <div class="motores">
+        <button class="motor-mini" data-motor="claude" type="button"><span class="mm-nome">Claude <span class="selo-recomendado">RECOMENDADO</span></span><span class="motor-selo"></span></button>
+        <button class="motor-mini" data-motor="codex" type="button"><span class="mm-nome">Codex</span><span class="motor-selo"></span></button>
+        <button class="motor-mini motor-mini-nativa" data-motor="arcano" type="button"><span class="mm-nome">IA nativa <span class="mm-gasta">gasta créditos</span></span><span class="motor-selo"></span></button>
+      </div>
+      <div class="linha-info"><span class="lampada" id="conta-motor-luz" data-estado="vazio"></span><span id="conta-motor">...</span></div>
+      <div class="acoes"><button class="btn btn-mini" id="conta-verificar" type="button">Verificar atualização do Claude Code</button><button class="btn btn-mini" id="conta-trocar-claude" type="button" hidden>Sair e entrar com outra conta do Claude</button></div>
+    </div>
+    <div class="cartao-bloco">
+      <div class="bloco-titulo">Gerações pedidas pela IA do chat</div>
+      <p class="nota" style="margin-top:0">Quando a IA do chat quiser gerar vídeo ou imagem (gasta créditos do ArcanoApp), o painel pede a sua permissão antes.</p>
+      <label class="linha-check"><input type="checkbox" id="conta-ia-sempre"> <span>Sempre aprovar sem perguntar</span></label>
+    </div>
+    <div class="cartao-bloco" id="conta-revisao">
+      <div class="bloco-titulo">Revisão automática do vídeo</div>
+      <p class="nota" style="margin-top:0">Ligada, a IA confere o que fez (olha os quadros e revisa o vídeo inteiro) antes de dizer que terminou. Fica mais caprichado, mas gasta mais do limite do seu Claude/ChatGPT. Desligada, ela termina direto e você pede a revisão quando quiser.</p>
+      <label class="linha-check"><input type="checkbox" id="conta-revisao-auto"> <span>Ligar a revisão automática</span></label>
+    </div>
+    <div class="cartao-bloco">
+      <div class="bloco-titulo">Suporte</div>
+      <p class="nota" style="margin-top:0">Dúvidas, problemas ou renovação: fale com a gente no WhatsApp.</p>
+      <div class="acoes"><button class="btn btn-mini btn-whats" id="conta-suporte" type="button">Abrir WhatsApp</button></div>
+    </div>
+    <div class="cartao-bloco">
+      <div class="bloco-titulo">Arcano Motion</div>
+      <div class="linha-info"><span id="conta-plugin"></span></div>
+      <div class="acoes"><button class="btn btn-mini btn-primario" id="conta-atualizar" type="button">Verificar atualização</button><button class="btn btn-mini" id="conta-ajustes" type="button">Ajustes e diagnóstico</button><button class="btn btn-mini" id="conta-nova" type="button">Nova conversa</button></div>
+    </div>
+  </div>
+
+  <div class="modal" id="modal" hidden>
+    <div class="modal-caixa" role="dialog" aria-modal="true" aria-labelledby="modal-titulo">
+      <div class="modal-topo"><span class="modal-icone" id="modal-icone"></span><div><div class="modal-grupo" id="modal-grupo"></div><div class="modal-titulo" id="modal-titulo"></div></div></div>
+      <p class="modal-desc" id="modal-desc"></p>
+      <div class="modal-campos" id="modal-campos"></div>
+      <div class="modal-acoes"><button class="btn" id="modal-cancelar" type="button">Cancelar</button><button class="btn btn-primario" id="modal-ok" type="button">Aplicar</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" hidden><span class="lampada" data-estado="ok"></span><span id="toast-txt"></span></div>
+
+  <div class="entrada">
+    <div class="menu-modelo" id="menu-modelo" role="menu" hidden>
+      <button class="item-modelo" id="item-auto" type="button" data-modelo="">
+        <span class="im-textos"><span class="im-nome">Automático</span><span class="im-desc">Padrão do seu plano</span></span><span class="im-check" aria-hidden="true"></span>
+      </button>
+      <div class="mm-divisor"></div>
+      <div id="lista-familias"></div>
+      <div class="mm-divisor"></div>
+      <div class="mm-promo" id="promo-arcano" hidden><span class="selo-promo">PROMO</span><span>Preço promocional de lançamento: o Arcano Code está gastando menos créditos por resposta por tempo limitado.</span></div>
+      <div class="mm-titulo">Esforço</div>
+      <div class="esforcos" id="lista-esforcos" role="group" aria-label="Esforço"></div>
+      <p class="mm-nota" id="nota-esforco"></p>
+    </div>
+    <div class="trabalhando" id="trabalhando" hidden><span class="lampada" data-estado="verificando"></span><span id="trabalhando-txt">O Claude está trabalhando...</span></div>
+    <div class="dica-remoto" id="dica-remoto" hidden><span class="dica-remoto-ic" id="dica-remoto-ic" aria-hidden="true"></span><span class="dica-remoto-txt"><b>Novo:</b> comande este After pelo celular e receba o vídeo pronto.</span><button class="link-mini" id="dica-remoto-abrir" type="button">Ativar</button><button class="dica-remoto-x" id="dica-remoto-x" type="button" aria-label="Fechar dica">&times;</button></div>
+    <div class="chat-anexos" id="chat-anexos" hidden></div>
+    <textarea id="campo-msg" rows="2" placeholder="Escreva o que quer no After..." title="Enter envia · Shift+Enter quebra linha · Ctrl+Z no After desfaz" aria-label="Mensagem"></textarea>
+    <div class="rodape-chat">
+      <div class="info-rodape">
+        <button class="btn-anexo" id="btn-anexo" type="button" title="Mandar arquivos para o projeto: logo, PSD, imagens, vídeos, áudio, PDF/AI, fontes e textos com as cores da marca. Também dá para arrastar para o chat." aria-label="Anexar arquivos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5 12.3 19.7a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg></button>
+        <button class="btn-remoto" id="btn-remoto" type="button" hidden aria-label="Controle remoto ligado"></button>
+        <button class="btn-modelo" id="btn-modelo" type="button" aria-haspopup="true" aria-expanded="false" title="Modelo e esforço"><span id="btn-modelo-txt">Automático</span> <span aria-hidden="true">&#9662;</span></button>
+        <span class="info-item modelo-usado" id="modelo-usado" title="Modelo que respondeu por último"></span>
+        <button class="info-item anel-uso" id="uso-sessao" type="button" title="Sessão de 5 horas">
+          <svg class="anel" viewBox="0 0 20 20" aria-hidden="true"><circle class="anel-fundo" cx="10" cy="10" r="8"></circle><circle class="anel-valor" id="anel-valor" cx="10" cy="10" r="8"></circle></svg>
+          <span class="uso-texto" id="uso5h-txt">—</span>
+        </button>
+        <label class="info-item chk-skill" title="Direção de arte avançada nas artes novas: cor, fonte, composição e refino. Desligado, a IA trabalha como antes."><input type="checkbox" id="chk-skill-design"><span>Skill Arcano Design</span></label>
+        <label class="info-item chk-skill" title="Motion avançado para qualquer tipo de peça: curvas, coreografia, texto cinético, números e transições no padrão das melhores skills de animação. Desligado, a IA anima como antes."><input type="checkbox" id="chk-skill-motion"><span>Skill Arcano Motion</span></label>
+        <span class="info-item" id="contexto-txt" title="Tokens de contexto da conversa atual"></span>
+      </div>
+      <button class="btn btn-mini" id="btn-parar" type="button" hidden>Parar</button>
+      <button class="btn btn-primario btn-enviar" id="btn-enviar" type="button">Enviar</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= AJUSTES ================= -->
+<section id="tela-config" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1>Ajustes</h1>
+
+  <h2 class="secao">Modo</h2>
+  <p id="cfg-modo-texto"></p>
+  <div class="acoes"><button class="btn" id="btn-trocar-modo" type="button">Trocar modo ou reconectar</button></div>
+
+  <div class="so-ae">
+  <h2 class="secao">Como a IA anima</h2>
+  <div class="opcoes-modo" role="radiogroup" aria-label="Como a IA anima">
+    <button class="opcao opcao-mini" type="button" role="radio" data-estilo="keyframes">
+      <span class="opcao-titulo">Keyframes (editável)</span>
+      <span class="opcao-texto">Tudo vira keyframe na timeline, com easing. Você edita no Graph Editor como uma animação feita à mão.</span>
+    </button>
+    <button class="opcao opcao-mini" type="button" role="radio" data-estilo="expressoes">
+      <span class="opcao-titulo">Expressões (procedural)</span>
+      <span class="opcao-texto">Animação por expressões com sliders de controle. Ajusta rápido, mas não dá para mexer keyframe por keyframe.</span>
+    </button>
+  </div>
+  <p class="nota" id="nota-estilo"></p>
+  </div>
+
+  <h2 class="secao">Modelo e esforço</h2>
+  <p class="nota">No Claude, escolha no menu do rodapé do chat, ao lado do botão Enviar. O Codex usa o modelo padrão do seu Codex. No Arcano Code você escolhe só o esforço, no mesmo menu.</p>
+
+  <h2 class="secao">Caminho do Claude Code</h2>
+  <p class="nota">Deixe vazio para detectar sozinho. Só preencha se o Arcano Motion não achar.</p>
+  <input id="cfg-caminho" class="campo-solo" type="text" spellcheck="false" placeholder="C:\Users\SEU_USUARIO\.local\bin\claude.exe" aria-label="Caminho do Claude Code">
+
+  <div class="acoes">
+    <button class="btn btn-primario" id="btn-salvar-config" type="button">Salvar</button>
+    <button class="btn" data-ir="tela-chat" type="button">Voltar ao chat</button>
+  </div>
+
+  <h2 class="secao">Diagnóstico</h2>
+  <div class="testes">
+    <div class="teste" id="t-after"><span class="lampada" data-estado="vazio"></span><div><div class="teste-nome">Comunicação com o After</div><div class="teste-res">Aguardando</div></div></div>
+    <div class="teste" id="t-escrita"><span class="lampada" data-estado="vazio"></span><div><div class="teste-nome">Permissão de gravar arquivos</div><div class="teste-res">Aguardando</div></div></div>
+    <div class="teste" id="t-frame"><span class="lampada" data-estado="vazio"></span><div><div class="teste-nome">Renderizar frame (os olhos do Claude)</div><div class="teste-res">Aguardando</div></div></div>
+    <div class="teste" id="t-claude"><span class="lampada" data-estado="vazio"></span><div><div class="teste-nome">Conexão com a IA do chat</div><div class="teste-res">Aguardando</div></div></div>
+  </div>
+  <div class="acoes">
+    <button id="btn-testar" class="btn" type="button">Rodar diagnóstico</button>
+    <button id="btn-copiar" class="btn" type="button">Copiar relatório</button>
+  </div>
+  <textarea id="relatorio" readonly aria-label="Relatório de diagnóstico"></textarea>
+</section>
+
+<!-- ================= ERRO GRAVE ================= -->
+<section id="tela-erro" class="tela" hidden>
+  <header class="marca"><span class="marca-simbolo" aria-hidden="true"></span><span class="marca-nome">Arcano Motion</span></header>
+  <h1>O motor interno não iniciou</h1>
+  <p class="lead" id="erro-texto">O painel abriu, mas o Node.js do After não está disponível. Reinstale o Arcano Motion e reinicie o After.</p>
+</section>
+
+<script>window.ARCANO_WEB_VERSAO = "1.2.29"; window.ARCANO_SCRIPTS = ["js/host.js", "js/licenca-config.js", "js/catalogo.js", "js/movimentos.js", "js/lut-psd.js", "js/i18n-dados.js", "js/i18n.js", "js/qrcode.js", "js/sinonimos.js", "js/app.js"];</script>
+<script src="web/buffer.js"></script>
+<script src="web/shim.js"></script>
+</body>
+</html>
