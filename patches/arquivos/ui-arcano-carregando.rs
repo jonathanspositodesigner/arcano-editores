@@ -8,7 +8,8 @@
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+// web_time: no navegador o Instant do std não existe (dava "time not implemented" e a tela ficava preta)
+use web_time::{Duration, Instant};
 
 use serde_json::Value;
 
