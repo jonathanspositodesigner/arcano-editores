@@ -1,0 +1,59 @@
+# Espelho do plugin Arcano Motion no navegador (regra do dono: o MESMO plugin, de uma fonte só).
+# Ninguém edita plugin/ à mão. Este workflow lê a versão PUBLICADA no ArcanoApp (latest.json),
+# baixa o mesmo zip que o plugin do After baixa ao se atualizar (confere o sha256) e gera plugin/
+# com a camada web publicada junto (shim.js, buffer.js, gerar-espelho.sh). A Hostinger implanta no push.
+name: Espelho do plugin
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: espelho-plugin
+  cancel-in-progress: false
+
+jobs:
+  espelho:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: site }
+      - name: Versão publicada
+        id: v
+        run: |
+          SITE=https://arcanoapp.voxvisual.com.br/downloads/arcano-motion
+          curl -fsSL "$SITE/latest.json?t=$(date +%s)" -o latest.json
+          V=$(jq -r .versao latest.json); A=$(cat site/plugin/VERSAO 2>/dev/null || true)
+          echo "publicada=$V espelho=$A"
+          echo "versao=$V" >> "$GITHUB_OUTPUT"
+          echo "site=$SITE" >> "$GITHUB_OUTPUT"
+          [ -n "$V" ] && [ "$V" != "null" ] || { echo "latest.json sem versão"; exit 1; }
+          if [ "$V" = "$A" ]; then echo "muda=0" >> "$GITHUB_OUTPUT"; else echo "muda=1" >> "$GITHUB_OUTPUT"; fi
+      - name: Gerar espelho
+        if: steps.v.outputs.muda == '1'
+        run: |
+          set -euo pipefail
+          SITE="${{ steps.v.outputs.site }}"; V="${{ steps.v.outputs.versao }}"
+          mkdir -p fonte/web
+          curl -fsSL "$(jq -r .zip.url latest.json)" -o plugin.zip
+          echo "$(jq -r .zip.sha256 latest.json)  plugin.zip" | sha256sum -c -
+          unzip -q plugin.zip -d fonte
+          [ -f fonte/com.arcano.motion/js/app.js ] || { echo "zip sem com.arcano.motion"; exit 1; }
+          grep -q "var VERSAO = '$V'" fonte/com.arcano.motion/js/app.js || { echo "zip não é a $V"; exit 1; }
+          for f in shim.js buffer.js gerar-espelho.sh; do curl -fsSL "$SITE/web/$f?v=$V" -o "fonte/web/$f"; done
+          bash fonte/web/gerar-espelho.sh "$PWD/site/plugin" "$V"
+      - name: Publicar
+        if: steps.v.outputs.muda == '1'
+        run: |
+          cd site
+          git config user.name "arcano-build"
+          git config user.email "arcano-build@users.noreply.github.com"
+          git add -A plugin
+          git diff --cached --quiet && exit 0
+          git commit -m "Espelho do plugin ${{ steps.v.outputs.versao }} (versão publicada)"
+          ok=0; for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push && { ok=1; break; }; git rebase --abort 2>/dev/null; sleep 5; done; [ "$ok" = 1 ] || { echo "não consegui publicar"; exit 1; }
