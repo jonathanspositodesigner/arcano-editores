@@ -37,6 +37,11 @@ pub struct Painel {
     logado: bool,
     conferido: Option<Instant>,
     erro: Option<String>,
+    /// Recados do painel para o editor (`window.ipc.postMessage` no WebView): a barra rápida e a
+    /// conta do editor de imagem (`photocraft_ui_egui::arcano::receber`). O vídeo não usa.
+    ao_receber: Option<fn(&str)>,
+    /// Pedidos do editor esperando o painel abrir.
+    fila: Vec<String>,
 }
 
 impl Painel {
@@ -55,7 +60,19 @@ impl Painel {
             logado: false,
             conferido: None,
             erro: None,
+            ao_receber: None,
+            fila: Vec::new(),
         }
+    }
+
+    /// O que fazer com os recados do painel (o editor de imagem liga a barra rápida aqui).
+    pub fn ao_receber(&mut self, f: fn(&str)) {
+        self.ao_receber = Some(f);
+    }
+
+    /// Um pedido do editor para o painel (JSON): vai para `window.arcanoBarra(...)` do plugin.
+    pub fn mandar(&mut self, json: &str) {
+        self.fila.push(json.to_string());
     }
 
     /// A pasta comum do Arcano (a mesma do plugin): ArcanoMotion/.
@@ -161,6 +178,14 @@ impl Painel {
                 }
             }
         }
+        #[cfg(any(windows, target_os = "macos"))]
+        if let Some(web) = &self.web
+            && !self.fila.is_empty()
+        {
+            for p in std::mem::take(&mut self.fila) {
+                let _ = web.evaluate_script(&format!("window.arcanoBarra && window.arcanoBarra({p})"));
+            }
+        }
         #[cfg(not(any(windows, target_os = "macos")))]
         let _ = frame;
         if let Some(r) = lugar {
@@ -232,7 +257,14 @@ impl Painel {
         // Windows: os dados do WebView ficam na pasta do usuário (Arquivos de Programas não é gravável).
         let dados = Self::pasta_comum().map(|p| p.join(format!("painel-{}", self.app)));
         let mut contexto = wry::WebContext::new(dados);
+        let ao_receber = self.ao_receber;
         let r = wry::WebViewBuilder::new_with_web_context(&mut contexto)
+            // recados do painel para o editor (barra rápida, conta)
+            .with_ipc_handler(move |pedido: wry::http::Request<String>| {
+                if let Some(f) = ao_receber {
+                    f(pedido.body());
+                }
+            })
             .with_url(url)
             .with_visible(false)
             // link que sai do Arcano (site, cadastro, suporte, pagamento): abre no navegador do PC

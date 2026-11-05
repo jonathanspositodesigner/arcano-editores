@@ -63,6 +63,23 @@
     aplicar();
   };
 
+  // Barra rápida da camada e conta do ArcanoApp (arcano.rs do editor, desenhadas pelo editor): os
+  // pedidos do editor (alterar, upscale, remover fundo, sair) vão para o painel do Arcano Design, que
+  // faz a IA; os recados do painel (conta, preços, andamento, erro) voltam para o editor.
+  var recados = [];
+  setInterval(function () {
+    var m = window.photocraftArcano;
+    if (!m || typeof m.arcanoBarraPedidos !== 'function') { return; }
+    while (recados.length) { try { m.arcanoBarraReceber(JSON.stringify(recados.shift())); } catch (e) { /* segue */ } }
+    var lista = [];
+    try { lista = JSON.parse(m.arcanoBarraPedidos()) || []; } catch (e) { return; }
+    lista.forEach(function (p) { try { painel.contentWindow.postMessage({ arcanoBarraPedido: p }, location.origin); } catch (e) { /* sem painel */ } });
+  }, 150);
+  window.addEventListener('message', function (e) {
+    if (e.source !== painel.contentWindow || e.origin !== location.origin || !e.data || !e.data.arcanoBarra) { return; }
+    recados.push(e.data.arcanoBarra);
+  });
+
   function montar() {
     document.body.appendChild(painel);
     document.body.appendChild(alca);

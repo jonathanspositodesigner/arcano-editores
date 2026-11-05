@@ -11,7 +11,10 @@ pub struct Host {
 
 impl Host {
     pub fn new(app: PhotocraftApp) -> Self {
-        Self { app, painel: crate::painel_arcano::Painel::new("imagem"), atualizador: crate::atualizador_arcano::Atualizador::new("imagem") }
+        let mut painel = crate::painel_arcano::Painel::new("imagem");
+        // a barra rápida e a conta do editor conversam com o painel do Arcano Design
+        painel.ao_receber(photocraft_ui_egui::arcano::receber);
+        Self { app, painel, atualizador: crate::atualizador_arcano::Atualizador::new("imagem") }
     }
 }
 
@@ -43,6 +46,9 @@ impl eframe::App for Host {
             })
             .inner;
         eframe::App::ui(&mut self.app, ui, frame);
+        for p in photocraft_ui_egui::arcano::pedidos() {
+            self.painel.mandar(&p.to_string());
+        }
         self.painel.quadro(ui.ctx(), frame, Some(lugar));
         self.painel.trava(ui.ctx(), "Arcano Design");
         self.atualizador.quadro(ui.ctx(), "Arcano Layers Imagem");

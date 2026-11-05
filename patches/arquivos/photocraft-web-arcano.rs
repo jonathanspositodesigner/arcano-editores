@@ -123,3 +123,16 @@ thread_local! {
 pub fn erro() -> String {
     ERRO.with(|x| x.borrow().clone())
 }
+
+/// Barra rápida e conta (arcano.rs do ui-egui): o que o editor pediu ao painel desde a última vez
+/// (lista JSON). O montar-imagem.js busca e repassa ao painel do Arcano Design.
+#[wasm_bindgen(js_name = arcanoBarraPedidos)]
+pub fn barra_pedidos() -> String {
+    Value::Array(photocraft_ui_egui::arcano::pedidos()).to_string()
+}
+
+/// Barra rápida e conta: recado do painel (conta, preços, camada trabalhando, pronto, erro).
+#[wasm_bindgen(js_name = arcanoBarraReceber)]
+pub fn barra_receber(json: String) {
+    photocraft_ui_egui::arcano::receber(&json);
+}

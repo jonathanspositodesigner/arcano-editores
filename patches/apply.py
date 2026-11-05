@@ -128,6 +128,15 @@ def photocraft(r):
     troca(r, "apps/photocraft-web/src/web.rs", "        self.app.finish_type_reset_pass(ui.ctx());\n    }",
           "        self.app.finish_type_reset_pass(ui.ctx());\n        crate::arcano::sair();\n    }")
     troca(r, "crates/ui-egui/src/file_open.rs", "    pub(crate) fn place_bytes(&mut self,", "    pub fn place_bytes(&mut self,")
+    # Arcano Layers antigo + novo (05/11/2026): conta do ArcanoApp na barra do topo (créditos, Preços,
+    # perfil) e a barra rápida da camada (pedido + referência, Upscale, Remover fundo, Cor). Vale para o
+    # navegador e o programa de PC (o ui-egui é o mesmo). Quem faz a IA é o painel do Arcano Design.
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-barra.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod links;\n", "pub mod arcano;\npub mod links;\n")
+    troca(r, "crates/ui-egui/src/panels/title_bar.rs", "                    ui.spacing_mut().item_spacing.x = 6.0;\n",
+          "                    ui.spacing_mut().item_spacing.x = 6.0;\n                    crate::arcano::conta_ui(app, ui);\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs", "        canvas::extra_windows(self, &ctx);\n",
+          "        canvas::extra_windows(self, &ctx);\n        crate::arcano::barra(self, &ctx);\n")
     # arcano.rs guarda onde o app está entre quadros (um ponteiro, ver o SAFETY lá): este crate sai do
     # "unsafe proibido" do workspace (o resto do editor continua com ele).
     troca(r, "apps/photocraft-web/Cargo.toml", "[lints]\nworkspace = true\n", "")
@@ -294,6 +303,15 @@ pub(crate) const GATE: &str =""")
           "pub fn get(path: &str) -> Option<Arc<[u8]>> {")
     troca(r, fw, "        if quiet || crate::is_worker() {\n            return Ok(());\n        }\n        download(",
           "        if quiet || crate::is_worker() || caminho_do_pc(path) {\n            return Ok(());\n        }\n        download(")
+    # PSD/PSB (e PDF/AI) no navegador entravam chapados como imagem: o navegador importava direto, sem
+    # a pergunta "Importar como" que o programa de PC faz (Composição / Composição - Manter tamanho das
+    # camadas). Agora pergunta igual (o mesmo formulário do editor).
+    troca(r, "apps/effectcraft-web/src/app.rs",
+          '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {',
+          '    if !media.is_empty() && effectcraft_ui_egui::panels::dialogs::open_form(app, "file.import", &json!({"paths": media.clone()})) {\n'
+          '        return;\n    }\n'
+          '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {')
+    psd_fiel(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
           "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
@@ -410,6 +428,123 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
     # Nome deles em qualquer texto que sobrou (menus, mensagens, tutoriais, traduções).
     nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "crates/effects", "crates/script", "crates/export", "crates/lottie", "apps/effectcraft-web"),
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
+
+
+def psd_fiel(r):
+    """PSD no editor de vídeo igual ao editor de imagem (pedido do dono, 05/11/2026):
+    - fonte: o PSD guarda o nome PostScript (`Dirtyline36Daysoftype2022-Regular`); o importador cortava
+      no "-" e procurava uma família que não existe (`Dirtyline36Daysoftype2022`), caindo na Inter.
+      Agora acha a fonte INSTALADA pelo nome PostScript (como o editor de imagem) e usa a família/estilo
+      dela; sem a fonte, guarda o nome inteiro (acha sozinho quando a fonte for instalada);
+    - texto com vários estilos (duas fontes na mesma linha): cada trecho com a sua fonte, tamanho e cor
+      (antes o 1º estilo valia pro texto todo);
+    - recorte (clipping) só dentro da camada base, como no Photoshop: virou matte de alfa da base. O
+      "preservar transparência" usava tudo o que está embaixo e, em grupo atravessado, a textura do
+      título virava um retângulo por cima da arte."""
+    ed = "crates/psd/src/engine_data.rs"
+    troca(r, ed, 'pub fn text_style(ed: &EValue) -> TextStyle {\n    let engine = ed.get("EngineDict").unwrap_or(ed);',
+          'pub fn text_style(ed: &EValue) -> TextStyle {\n    text_style_at(ed, 0)\n}\n\n'
+          '/// Arcano: os estilos de TODOS os trechos (tamanho em unidades UTF-16, como o Photoshop conta), na ordem.\n'
+          'pub fn text_runs(ed: &EValue) -> Vec<(usize, TextStyle)> {\n'
+          '    let engine = ed.get("EngineDict").unwrap_or(ed);\n'
+          '    let Some(EValue::Array(lens)) = engine.path("StyleRun/RunLengthArray") else { return Vec::new() };\n'
+          '    lens.iter().enumerate().filter_map(|(i, n)| Some((n.num()?.max(0.0) as usize, text_style_at(ed, i)))).collect()\n'
+          '}\n\n'
+          '/// Os atributos do trecho `i` (sem o atributo, vale o estilo normal do documento).\n'
+          'pub fn text_style_at(ed: &EValue, i: usize) -> TextStyle {\n    let engine = ed.get("EngineDict").unwrap_or(ed);')
+    troca(r, ed, '    let run = engine.path("StyleRun/RunArray/0/StyleSheet/StyleSheetData");',
+          '    let run = engine.path(&format!("StyleRun/RunArray/{i}/StyleSheet/StyleSheetData"));')
+    troca(r, "crates/psd/src/model.rs",
+          "    /// Text bounds (left, top, right, bottom) relative to the origin, when stored.\n    pub bounds: Option<[f64; 4]>,\n}",
+          "    /// Text bounds (left, top, right, bottom) relative to the origin, when stored.\n    pub bounds: Option<[f64; 4]>,\n"
+          "    /// Arcano: cada trecho de estilo (tamanho em UTF-16, estilo), na ordem do texto.\n    pub runs: Vec<(usize, engine_data::TextStyle)>,\n}")
+    troca(r, "crates/psd/src/parse.rs",
+          '                let style = d.raw("EngineData").map(|e| engine_data::text_style(&engine_data::parse(e))).unwrap_or_default();',
+          '                let ed = d.raw("EngineData").map(engine_data::parse);\n'
+          '                let style = ed.as_ref().map(engine_data::text_style).unwrap_or_default();\n'
+          '                let runs = ed.as_ref().map(engine_data::text_runs).unwrap_or_default();')
+    troca(r, "crates/psd/src/parse.rs", "                l.text = Some(TextInfo { text, transform: t, style, bounds });",
+          "                l.text = Some(TextInfo { text, transform: t, style, bounds, runs });")
+    pi = "crates/engine/src/interchange/psd_import.rs"
+    troca(r, pi, "fn text_doc(t: &effectcraft_psd::TextInfo) -> TextDoc {",
+          "/// Arcano: o nome PostScript do PSD → a família e o estilo da fonte INSTALADA (como o editor de\n"
+          "/// imagem acha). Sem a fonte: o nome inteiro (acha sozinho quando for instalada).\n"
+          "fn fonte_instalada(ps: &str) -> (String, String) {\n"
+          "    let r = effectcraft_text::resolve(ps, \"\");\n"
+          "    if r.missing {\n"
+          "        return (ps.to_string(), String::new());\n"
+          "    }\n"
+          "    let f = effectcraft_text::fonts::face(r.face);\n"
+          "    (f.info.family.clone(), f.info.style.clone())\n"
+          "}\n\n"
+          "/// Arcano: alguma fonte do texto não está instalada (no navegador, só as que vêm com o editor).\n"
+          "fn fonte_faltando(t: &effectcraft_psd::TextInfo) -> bool {\n"
+          "    t.style.font.iter().chain(t.runs.iter().filter_map(|(_, s)| s.font.as_ref())).any(|f| effectcraft_text::resolve(f, \"\").missing)\n"
+          "}\n\n"
+          "fn text_doc(t: &effectcraft_psd::TextInfo) -> TextDoc {")
+    # Sem a fonte instalada: o texto entra como a imagem que o próprio PSD guarda (igual ao original, sem
+    # editar), como o Photoshop mostra; com a fonte instalada, importar de novo traz o texto editável.
+    troca(r, pi, "    } else if let Some(t) = &pl.text {\n        text_layer(proj, comp, &name, t)",
+          "    } else if let Some(t) = pl.text.as_ref().filter(|t| !(fonte_faltando(t) && pl.has_pixels())) {\n        text_layer(proj, comp, &name, t)")
+    troca(r, pi, "    if let Some(f) = &t.style.font {\n        let (fam, style) = font_names(f);\n        d.font = fam;\n        d.style = style;\n    }",
+          "    if let Some(f) = &t.style.font {\n        let (fam, style) = fonte_instalada(f);\n        d.font = fam;\n        d.style = style;\n    }")
+    troca(r, pi, "    d.faux_bold = t.style.faux_bold;\n    d.faux_italic = t.style.faux_italic;\n",
+          "    d.faux_bold = t.style.faux_bold;\n    d.faux_italic = t.style.faux_italic;\n"
+          "    // Arcano: cada trecho com a sua fonte, tamanho e cor (duas fontes na mesma linha, como no Photoshop).\n"
+          "    if t.runs.len() > 1 {\n"
+          "        let chars: Vec<char> = t.text.chars().collect();\n"
+          "        let mut ci = 0usize;\n"
+          "        for (len16, st) in &t.runs {\n"
+          "            let ini = ci;\n"
+          "            let mut n = 0usize;\n"
+          "            while n < *len16 && ci < chars.len() {\n"
+          "                n += chars[ci].len_utf16();\n"
+          "                ci += 1;\n"
+          "            }\n"
+          "            if ci == ini {\n"
+          "                continue;\n"
+          "            }\n"
+          "            let fonte = st.font.as_deref().map(fonte_instalada);\n"
+          "            let tam = st.size.map(|s| s * scale).filter(|s| s.is_finite() && *s > 0.0);\n"
+          "            d.apply_style(ini..ci, |c| {\n"
+          "                if let Some((fam, sty)) = &fonte {\n"
+          "                    c.font = fam.clone();\n"
+          "                    c.style = sty.clone();\n"
+          "                }\n"
+          "                if let Some(s) = tam {\n"
+          "                    c.size = s;\n"
+          "                }\n"
+          "                if let Some(k) = st.color {\n"
+          "                    c.fill = [k[0] as f32, k[1] as f32, k[2] as f32, 1.0];\n"
+          "                }\n"
+          "                if let Some(tr) = st.tracking.filter(|v| v.is_finite()) {\n"
+          "                    c.tracking = tr;\n"
+          "                }\n"
+          "                c.faux_bold = st.faux_bold;\n"
+          "                c.faux_italic = st.faux_italic;\n"
+          "            });\n"
+          "        }\n"
+          "    }\n")
+    troca(r, pi, "    for n in nodes {\n        if let Some(l) = build_layer(proj, cx, &comp, n) {\n            comp.layers.push(l);\n        }\n    }\n    styles::sync_comp(&mut comp);",
+          "    for n in nodes {\n        if let Some(l) = build_layer(proj, cx, &comp, n) {\n            comp.layers.push(l);\n        }\n    }\n"
+          "    // Arcano: recorte (clipping) = só dentro da camada base (a 1ª sem recorte abaixo), como no Photoshop.\n"
+          "    let recortes: Vec<(usize, Option<(effectcraft_project::LayerId, bool)>)> = comp\n"
+          "        .layers\n"
+          "        .iter()\n"
+          "        .enumerate()\n"
+          "        .filter(|(_, l)| l.preserve_transparency)\n"
+          "        .map(|(k, _)| (k, comp.layers.iter().skip(k + 1).find(|l| !l.preserve_transparency).map(|b| (b.id, b.switches.video))))\n"
+          "        .collect();\n"
+          "    for (k, base) in recortes {\n"
+          "        if let (Some((id, visivel)), Some(l)) = (base, comp.layers.get_mut(k)) {\n"
+          "            l.track_matte = Some(effectcraft_project::TrackMatte { layer: id, kind: effectcraft_project::MatteKind::Alpha });\n"
+          "            l.preserve_transparency = false;\n"
+          "            if !visivel {\n"
+          "                l.switches.video = false;\n"
+          "            }\n"
+          "        }\n"
+          "    }\n"
+          "    styles::sync_comp(&mut comp);")
 
 
 def painel_pc_video(r):
