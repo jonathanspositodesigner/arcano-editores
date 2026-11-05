@@ -598,6 +598,19 @@
       }, function () { responder([]); });
     }
   });
+  // Conta > Limpar cache: o conector mede/apaga os arquivos velhos das pastas do Arcano (sem mil idas e voltas).
+  // Promessa de [{ pasta, arquivos, bytes, ficam, falhas }] ou null (conector antigo, sem a rota).
+  window.arcanoLimpeza = function (pedido) {
+    if (!conectorPeloMenos('0.4.2')) { return Promise.resolve(null); }
+    return op('/plugin/limpeza', pedido || {}).then(function (r) { return r; }, function () { return null; });
+  };
+  // A versão do Arcano Conector é pelo menos `v`? (a pasta dos arquivos em outro HD precisa da 0.4.2)
+  function conectorPeloMenos(v) {
+    var a = String((INFO && INFO.conector) || '0').split('.'), b = String(v).split('.');
+    for (var i = 0; i < 3; i++) { var x = parseInt(a[i] || '0', 10) || 0, y = parseInt(b[i] || '0', 10) || 0; if (x !== y) { return x > y; } }
+    return true;
+  }
+  window.arcanoConectorPeloMenos = conectorPeloMenos;
   // O painel (projeto do After) também pede fontes do PC: promessa de [{ nomes, arquivo, dados: Uint8Array }].
   window.arcanoFontesDoPC = function (nomes) {
     return op('/plugin/fontes', { nomes: (nomes || []).slice(0, 64) }).then(function (r) {

@@ -771,6 +771,29 @@
       <p class="nota" style="margin-top:0">Ligada, a IA confere o que fez (olha os quadros e revisa o vídeo inteiro) antes de dizer que terminou. Fica mais caprichado, mas gasta mais do limite do seu Claude/ChatGPT. Desligada, ela termina direto e você pede a revisão quando quiser.</p>
       <label class="linha-check"><input type="checkbox" id="conta-revisao-auto"> <span>Ligar a revisão automática</span></label>
     </div>
+    <div class="cartao-bloco" id="conta-arquivos">
+      <div class="bloco-titulo">Arquivos do Arcano Motion</div>
+      <p class="nota" style="margin-top:0">Onde o painel guarda o que gera e baixa: temporários, Biblioteca, imagens e áudios da IA (quando o projeto ainda não foi salvo) e LUTs. Escolha outro HD se o seu disco estiver cheio. Conta e configurações continuam no lugar de sempre.</p>
+      <div class="nota" id="arq-pasta" style="word-break:break-all;color:var(--texto,#e5e5e5)"></div>
+      <div class="acoes">
+        <button class="btn btn-mini btn-primario" id="arq-escolher" type="button">Escolher pasta ou HD…</button>
+        <button class="btn btn-mini" id="arq-abrir" type="button">Abrir a pasta</button>
+        <button class="btn btn-mini" id="arq-padrao" type="button">Voltar ao padrão</button>
+      </div>
+      <div class="bloco-titulo" style="margin-top:14px">Limpar cache</div>
+      <p class="nota" style="margin-top:0">Apaga o que o Arcano Motion gerou e baixou e já está velho. A Biblioteca baixa de novo quando você usar. Atenção: projeto que usa um arquivo apagado vai mostrar o arquivo como faltando.</p>
+      <label class="linha-check"><input type="checkbox" id="arq-temp" checked> <span>Temporários (prévias, revisões, downloads por link) <b id="arq-temp-t"></b></span></label>
+      <label class="linha-check"><input type="checkbox" id="arq-bib" checked> <span>Biblioteca e artes baixadas <b id="arq-bib-t"></b></span></label>
+      <label class="linha-check"><input type="checkbox" id="arq-ia"> <span>Arquivos que a IA gerou sem projeto salvo e LUTs <b id="arq-ia-t"></b></span></label>
+      <label class="linha-check" style="gap:8px">Apagar os com mais de
+        <select id="arq-dias" style="width:auto"><option value="0">qualquer idade</option><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select>
+      </label>
+      <div class="acoes">
+        <button class="btn btn-mini" id="arq-medir" type="button">Ver quanto ocupa</button>
+        <button class="btn btn-mini" id="arq-limpar" type="button">Limpar cache</button>
+      </div>
+      <div class="nota" id="arq-status"></div>
+    </div>
     <div class="cartao-bloco">
       <div class="bloco-titulo">Suporte</div>
       <p class="nota" style="margin-top:0">Dúvidas, problemas ou renovação: fale com a gente no WhatsApp.</p>

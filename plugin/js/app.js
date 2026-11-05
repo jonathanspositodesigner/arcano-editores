@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSAO = '1.2.33';
+  var VERSAO = '1.2.35';
   var VERSOES_MCP = ['2025-06-18', '2025-03-26', '2024-11-05'];
   var cep = window.__adobe_cep__;
 
@@ -149,6 +149,35 @@
     if (fs.existsSync(p)) { return; }
     garantirPasta(path.dirname(p));
     fs.mkdirSync(p);
+  }
+  // ---------- Pasta dos arquivos (pedido do dono): o que o painel gera e baixa pode ir para outro HD ----------
+  // Escolha comum ao After, Photoshop e navegador, em <pasta comum>/pastas.json { arquivos: "<HD>/Arcano Motion Arquivos" }.
+  // O nome final é sempre "Arcano Motion Arquivos" (o Arcano Conector só libera uma pasta com esse nome).
+  // Vai para lá: temporários, Biblioteca baixada, capas/artes, arquivos da IA sem projeto salvo, LUTs e as saídas do Photoshop.
+  // Fica na pasta comum: conta, configurações, conversas e os programas (yt-dlp, ouvido).
+  var NOME_PASTA_ARQUIVOS = 'Arcano Motion Arquivos';
+  var pastasLidas = { t: 0, v: null };
+  function arquivoPastas() { return R('path').join(pastaComum(), 'pastas.json'); }
+  function pastaArquivos() {
+    if (Date.now() - pastasLidas.t < 5000) { return pastasLidas.v; }
+    var v = null;
+    try {
+      // no navegador/programa de PC o Arcano Conector antigo (antes da 0.4.2) não libera a pasta
+      if (!window.ARCANO_NAVEGADOR || (window.arcanoConectorPeloMenos && window.arcanoConectorPeloMenos('0.4.2'))) {
+        var j = lerJSONArquivo(arquivoPastas()), p = j && j.arquivos;
+        if (p && R('path').basename(p) === NOME_PASTA_ARQUIVOS && R('fs').existsSync(p)) { v = p; }
+      }
+    } catch (e) { v = null; }
+    pastasLidas = { t: Date.now(), v: v };
+    return v;
+  }
+  function emArquivos(nome, padrao) { var p = pastaArquivos(); return p ? R('path').join(p, nome) : padrao; }
+  var tempCriada = '';
+  function raizTemp() {
+    var p = emArquivos('Temporarios', '');
+    if (!p) { return R('os').tmpdir(); }
+    if (tempCriada !== p) { try { garantirPasta(p); tempCriada = p; } catch (e) { return R('os').tmpdir(); } }
+    return p;
   }
   function arquivoConfig() { return R('path').join(pastaConfig(), 'config.json'); }
   function arquivoConta() { return R('path').join(pastaComum(), 'conta.json'); }
@@ -747,7 +776,7 @@
   }
   // Documentos de verdade (no Windows com OneDrive é outra pasta): o Photoshop sabe qual é (Folder.myDocuments)
   var pastaDocsPS = null;
-  function pastaDocumentosDesign() { return R('path').join(pastaDocsPS || R('path').join(R('os').homedir(), 'Documents'), 'Arcano Design'); }
+  function pastaDocumentosDesign() { return emArquivos('Arcano Design', R('path').join(pastaDocsPS || R('path').join(R('os').homedir(), 'Documents'), 'Arcano Design')); }
   function lerPastaDocumentosPS() {
     jsxCall('pastaDocumentos', [], 15000, function (r) { if (r && r.ok && r.resultado && r.resultado.pasta) { pastaDocsPS = r.resultado.pasta; } });
   }
@@ -766,7 +795,7 @@
 
   // ps_ver: o Photoshop grava a prévia; uma camada sozinha vem em PNG e ganha o xadrez da transparência aqui
   function verNoPhotoshop(camada, tamanho, fim) {
-    var path = R('path'), fs = R('fs'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), fs = R('fs'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (e) { fim({ erro: true, texto: 'ERRO: não consegui criar a pasta temporária: ' + e.message }); return; }
     var lado = Math.max(400, Math.min(1600, Math.round(tamanho) || 1200));
     var arq = path.join(pasta, 'ver_' + Date.now() + (camada ? '.png' : '.jpg'));
@@ -816,7 +845,7 @@
 
   function renderizarFrames(comp, tempos, cb) {
     var fs = R('fs'), path = R('path'), os = R('os');
-    var pasta = path.join(os.tmpdir(), 'arcano-motion');
+    var pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) { cb({ erro: true, texto: 'ERRO: não consegui criar a pasta temporária: ' + e.message }); return; }
     var lista = tempos.slice(0, 24), frames = [], i = 0, info = null;
 
@@ -991,6 +1020,20 @@
   // =====================================================================
   // Claude Code (modo assinatura)
   // =====================================================================
+  var VARS_CERTIFICADO = ['SSL_CERT_FILE', 'SSL_CERT_DIR', 'CODEX_CA_CERTIFICATE', 'NODE_EXTRA_CA_CERTS', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE'];
+  function limparCertificadosQuebrados(env) {
+    var fs = R('fs'), k;
+    for (k in env) {
+      if (!Object.prototype.hasOwnProperty.call(env, k) || VARS_CERTIFICADO.indexOf(String(k).toUpperCase()) < 0) { continue; }
+      var v = String(env[k] || '').trim().replace(/^"(.*)"$/, '$1');
+      var existe = false; try { existe = !!v && fs.existsSync(v); } catch (e) {}
+      if (!existe) { delete env[k]; }
+    }
+    return env;
+  }
+  // linhas que as janelas de instalar/entrar no Codex rodam antes (a janela não usa o ambienteLimpo)
+  var CMD_CERT = VARS_CERTIFICADO.map(function (v) { return 'if defined ' + v + ' if not exist "%' + v + '%" set "' + v + '="'; });
+  var SH_CERT = VARS_CERTIFICADO.map(function (v) { return 'if [ -n "$' + v + '" ] && [ ! -e "$' + v + '" ]; then unset ' + v + '; fi; '; }).join('');
   function ambienteLimpo() {
     var env = {}, k, src = node.process.env;
     for (k in src) { if (Object.prototype.hasOwnProperty.call(src, k)) { env[k] = src[k]; } }
@@ -999,6 +1042,10 @@
     delete env.ANTHROPIC_AUTH_TOKEN;
     env.ENABLE_TOOL_SEARCH = 'false';
     env.MCP_PROTOCOL_NEGOTIATION = 'legacy';
+    // 05/11/2026: variável de certificado apontando para arquivo que não existe (ex.: SSL_CERT_FILE deixado por um
+    // programa desinstalado, como o Cinema 4D) faz o Codex falhar em toda conexão ("Failed to read CA certificate
+    // file ... selected by SSL_CERT_FILE"). Arquivo inexistente = tira a variável e usa os certificados do sistema.
+    limparCertificadosQuebrados(env);
     // Mac: o After aberto pelo Dock só tem /usr/bin:/bin no PATH. Soma onde o Claude Code, o Homebrew e o Node instalam.
     if (!ehWindows()) {
       var home = R('os').homedir(), atuais = String(env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin').split(':');
@@ -1145,10 +1192,10 @@
     var cp = R('child_process'), fs = R('fs'), path = R('path');
     if (ehWindows()) {
       var bat = path.join(R('os').tmpdir(), 'arcano-motion-' + Date.now() + '.bat');
-      fs.writeFileSync(bat, ['@echo off', 'chcp 65001 >nul'].concat(linhasBat).join('\r\n') + '\r\n', 'utf8');
+      fs.writeFileSync(bat, ['@echo off', 'chcp 65001 >nul'].concat(CMD_CERT, linhasBat).join('\r\n') + '\r\n', 'utf8');
       cp.exec('start "" ' + aspas(bat), { windowsHide: false });
     } else {
-      var script = 'tell application "Terminal" to do script ' + JSON.stringify(comandoMac);
+      var script = 'tell application "Terminal" to do script ' + JSON.stringify(SH_CERT + comandoMac);
       cp.execFile('osascript', ['-e', script, '-e', 'tell application "Terminal" to activate']);
     }
   }
@@ -1594,7 +1641,7 @@
     if (!sb.arte || ehPS()) { cb(null); return; }
     var chave = (sb.comp || '') + '|' + (sb.frameArte === null ? '' : sb.frameArte);
     if (sbArteCache[chave]) { cb(sbArteCache[chave]); return; }
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-motion');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) { cb(null); return; }
     var arq = path.join(pasta, 'storyboard_' + Date.now() + '.png');
     jsxCall('renderFrame', [sb.comp, sb.frameArte, arq], 60000, function (r) {
@@ -4998,7 +5045,7 @@
   }
 
   // ---------- revisão: renderiza uma prévia leve e procura defeito no vídeo inteiro ----------
-  function pastaRevisao() { return R('path').join(R('os').tmpdir(), 'arcano-motion', 'revisao'); }
+  function pastaRevisao() { return R('path').join(raizTemp(), 'arcano-motion', 'revisao'); }
   function analisarVideoRevisao(arquivo, progresso, cb) {
     var fs = R('fs'), buf;
     try { buf = fs.readFileSync(arquivo); } catch (e) { cb('Não consegui ler a prévia: ' + e.message); return; }
@@ -5660,7 +5707,7 @@
       var link = String($('gp-link').value || '').replace(/^\s+|\s+$/g, '');
       if (baixandoLink || gp.rodando) { return; }
       if (!/^https?:\/\/\S+$/i.test(link)) { avisar('Cole o link completo do vídeo (começando com https://).', true); return; }
-      var path = R('path'), fs = R('fs'), pasta = path.join(R('os').tmpdir(), 'arcano-motion', 'links');
+      var path = R('path'), fs = R('fs'), pasta = path.join(raizTemp(), 'arcano-motion', 'links');
       // limpa downloads de mais de 2 dias
       try { fs.readdirSync(pasta).forEach(function (n) { var a = path.join(pasta, n); try { if (Date.now() - fs.statSync(a).mtime.getTime() > 2 * 86400000) { fs.unlinkSync(a); } } catch (eA) {} }); } catch (eL) {}
       baixandoLink = true; gp.cancelado = false;
@@ -5749,7 +5796,7 @@
     gp.rodando = true; gp.cancelado = false; gp.fonte = '';
     ui.etapa(2); ui.passo(1); ui.barra(0.02); ui.status('Abrindo o vídeo...');
     var pasta, fonte = null;
-    try { pasta = R('path').join(R('os').tmpdir(), 'arcano-motion', 'gerador-' + carimbo()); garantirPasta(pasta); } catch (e) { gp.rodando = false; ui.erro('Não consegui criar a pasta temporária: ' + e.message); return; }
+    try { pasta = R('path').join(raizTemp(), 'arcano-motion', 'gerador-' + carimbo()); garantirPasta(pasta); } catch (e) { gp.rodando = false; ui.erro('Não consegui criar a pasta temporária: ' + e.message); return; }
     function acabar(erro, res) {
       gp.rodando = false;
       if (fonte) { try { fonte.fechar(); } catch (eF) {} }
@@ -7301,7 +7348,7 @@
   function pastaDownloads() {
     var path = R('path'), d = path.join(R('os').homedir(), 'Downloads');
     try { if (R('fs').statSync(d).isDirectory()) { return d; } } catch (e) {}
-    return path.join(R('os').tmpdir(), 'arcano-motion');
+    return path.join(raizTemp(), 'arcano-motion');
   }
 
   // Uma vez só, no painel do After: o plugin agora também está no Photoshop (1.0.23)
@@ -8107,7 +8154,7 @@
   function previaSep(layerId) {
     if (sepPreviaId === layerId) { return; }
     sepPreviaId = layerId;
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (e) { return; }
     var arq = path.join(pasta, 'sep_previa_' + Date.now() + '.png');
     jsxCall('previa', ['id:' + layerId, 640, arq], 60000, function (r) {
@@ -8136,7 +8183,7 @@
     };
     if (sel.arquivo) { try { mostrar('data:image/' + (/\.png$/i.test(sel.arquivo) ? 'png' : 'jpeg') + ';base64,' + R('fs').readFileSync(sel.arquivo).toString('base64')); } catch (e) { mostrar(null); } return; }
     if (!sel.frame) { mostrar(null); return; }
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-motion');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e2) { mostrar(null); return; }
     var arq = path.join(pasta, 'sep_previa_' + Date.now() + '.png');
     jsxCall('renderFrame', ['id:' + sel.docId, null, arq], 60000, function (r) {
@@ -8221,7 +8268,7 @@
     var tem = cfg.conta && typeof cfg.conta.creditos === 'number' ? cfg.conta.creditos : null;
     if (tem !== null && tem < SEP.saldoMinimo * f) { falhar('Para separar em ' + q + ' você precisa ter pelo menos ' + SEP.saldoMinimo * f + ' créditos (você tem ' + tem + '). Nada foi cobrado.', { semCreditos: true }); return j; }
     atualizarSep(j, 'enviando', 'Preparando a imagem...');
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (e) { falhar('Não consegui criar a pasta temporária: ' + e.message); return j; }
     var png = path.join(pasta, 'separar_' + carimbo() + '_' + Math.floor(Math.random() * 1e6) + '.png');
     j.frame = !!op.frame;
@@ -8710,7 +8757,7 @@
     if (window.ARCANO_NAVEGADOR) { projeto = null; }
     if (ehPS()) { return projeto ? path.join(path.dirname(projeto), 'Arcano Design') : pastaDocumentosDesign(); }
     if (projeto) { return path.join(path.dirname(projeto), 'Arcano IA'); }
-    return path.join(R('os').homedir(), 'Documents', 'Arcano Motion IA');
+    return emArquivos('Arcano Motion IA', path.join(R('os').homedir(), 'Documents', 'Arcano Motion IA'));
   }
 
   // ---------- conta, preços e custo ----------
@@ -10007,7 +10054,7 @@
   // Windows: grava pelo próprio Windows (winmm/MCI via PowerShell) quando o navegador do painel não libera o microfone
   // (o After/Photoshop dão NotAllowedError em alguns PCs). Grava WAV 16 bits mono 24 kHz até parar ou bater o máximo.
   function gravadorWindows(maxSeg, aoTique, cb) {
-    var path = R('path'), fs = R('fs'), cp = R('child_process'), pasta = path.join(R('os').tmpdir(), 'arcano-motion');
+    var path = R('path'), fs = R('fs'), cp = R('child_process'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) { cb('Não consegui preparar a gravação.'); return null; }
     var base = path.join(pasta, 'voz_' + Date.now()), wav = base + '.wav', stop = base + '.stop', ps1 = base + '.ps1';
     var script = [
@@ -10502,7 +10549,7 @@
       subirImagemIA(cam.arquivo, nomeArquivoSeguro(cam.nome) + '_' + carimbo() + (R('path').extname(cam.arquivo).toLowerCase() || '.png'), cb);
       return;
     }
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-motion');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) {}
     var png = path.join(pasta, 'ia_' + carimbo() + '_' + Math.floor(Math.random() * 1e6) + '.png');
     jsxCall('exportarImagemIA', [j.compId, j.indice, origem, png, j.fundoVerde || false, j.margem || 0], 60000, function (r) {
@@ -11277,7 +11324,7 @@
   // ---------- a tela de cada ferramenta (dentro da aba Ferramentas, no lugar da lista) ----------
   // a prévia da camada selecionada (a mesma do Separar em camadas): cb(dataUrl|null)
   function previaCamadaPS(layerId, cb) {
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (e) { cb(null); return; }
     var arq = path.join(pasta, 'rh_previa_' + Date.now() + '_' + Math.floor(Math.random() * 1e5) + '.png');
     jsxCall('previa', ['id:' + layerId, 360, arq], 60000, function (r) {
@@ -11624,7 +11671,7 @@
   // "O que mudar nesta camada?": o mesmo caminho do Arcano Layers (flyer-politico /editar + /poll, GPT Image pela
   // kie), com a referência do "+" como segunda imagem. O resultado entra acima da camada e a original fica desligada.
   function alterarCamadaBarra(p, docId, camada, nome, ocupada, livre) {
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (e) { livre('Não consegui criar a pasta temporária: ' + e.message); return; }
     var base = 'alt_' + carimbo() + '_' + Math.floor(Math.random() * 1e6), png = path.join(pasta, base + '.png');
     var tem = cfg.conta && typeof cfg.conta.creditos === 'number' ? cfg.conta.creditos : null;
@@ -11705,7 +11752,7 @@
       terminar(msg);
     };
     if (!uid) { terminar('Entre de novo na sua conta do ArcanoApp (aba Conta) para usar o ' + def.nome + '.'); return u; }
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-design');
     try { garantirPasta(pasta); } catch (eP) { terminar('Não consegui criar a pasta temporária: ' + eP.message); return u; }
     var base = chave + '_' + carimbo() + '_' + Math.floor(Math.random() * 1e6), jpg = path.join(pasta, base + '.jpg');
     status('', 'Conferindo...');
@@ -12649,7 +12696,7 @@
     var path = R('path');
     if (window.ARCANO_NAVEGADOR) { projeto = null; }
     if (projeto) { return path.join(path.dirname(projeto), 'Arcano LUTs'); }
-    return path.join(R('os').homedir(), 'Documents', 'Arcano Motion LUTs');
+    return emArquivos('Arcano Motion LUTs', path.join(R('os').homedir(), 'Documents', 'Arcano Motion LUTs'));
   }
 
   function montarDetalheLUT() {
@@ -12714,7 +12761,7 @@
 
   function gerarLUTNoPhotoshop() {
     var path = R('path'), fs = R('fs'), os = R('os'), L = window.ArcanoLUT;
-    var raiz = path.join(os.tmpdir(), 'arcano-motion'), pasta = path.join(raiz, 'lut-' + Date.now());
+    var raiz = path.join(raizTemp(), 'arcano-motion'), pasta = path.join(raiz, 'lut-' + Date.now());
     var hald = path.join(raiz, 'arcano-neutra-512-16bits.png');
     try { garantirPasta(pasta); if (!fs.existsSync(hald)) { fs.writeFileSync(hald, L.gerarHaldPNG()); } }
     catch (e) { statusDetalhe('Não consegui preparar a imagem neutra: ' + e.message, 'erro'); return; }
@@ -12891,7 +12938,7 @@
   }
 
   function renderUm(compId, cb) {
-    var path = R('path'), os = R('os'), fs = R('fs'), pasta = path.join(os.tmpdir(), 'arcano-motion');
+    var path = R('path'), os = R('os'), fs = R('fs'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) {}
     var arq = path.join(pasta, 'lut_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + '.png');
     jsxCall('renderFrame', [compId, null, arq], 60000, function (r) {
@@ -13725,7 +13772,7 @@
   // cb(erro, {dataUrl|null, largura, altura, nome}); guarda por camada enquanto a aba está aberta
   function imagemDaCamada(indice, cb) {
     if (focoImgs[indice]) { cb(null, focoImgs[indice]); return; }
-    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-motion');
+    var path = R('path'), pasta = path.join(raizTemp(), 'arcano-motion');
     try { garantirPasta(pasta); } catch (e) {}
     var png = path.join(pasta, 'foco_' + carimbo() + '_' + Math.floor(Math.random() * 1e6) + '.png');
     jsxCall('imagemFoco', [indice, png], 60000, function (r) {
@@ -14044,7 +14091,7 @@
     });
   }
 
-  function pastaBibDrive() { return R('path').join(pastaConfig(), 'Biblioteca'); }
+  function pastaBibDrive() { return emArquivos(ehPS() ? 'Biblioteca Design' : 'Biblioteca', R('path').join(pastaConfig(), 'Biblioteca')); }
   // Nome CURTO no PC (o caminho comprido quebrava o projeto do After ao abrir em outro lugar):
   // <Biblioteca>/<pasta até 10>/<nome até 14>-<5 do id>.ext  (ex.: Efeitos/Flash_luz-k3f9a.mp4)
   function nomeCurto(t, max) {
@@ -14787,7 +14834,7 @@
   var artes = { filtro: 'minhas', pagina: 1, porPagina: 60, total: 0, lista: [], carregando: false, vez: 0, categorias: [], abrindo: {} };
   var EXT_PSD = /\.(psd|psb)$/i, EXT_FONTE = /\.(ttf|otf|ttc)$/i, EXT_ZIP = /\.zip$/i;
 
-  function pastaCacheArtes() { return R('path').join(pastaConfig(), 'Artes'); }
+  function pastaCacheArtes() { return emArquivos('Artes', R('path').join(pastaConfig(), 'Artes')); }
   function pastaTrabalhoArtes() { return R('path').join(pastaDocumentosDesign(), 'Artes'); }
   function thumbArte(url, largura) {
     var u = String(url || '');
@@ -16662,7 +16709,170 @@
     statusConta(function (e, r) { if (!e && r && r.ok) { atualizarCreditos(r.creditos); if (r.premium !== undefined) { definirPremium(r.premium === true, r.plus || null); } } });
   }
 
+  // ---------- Conta > Arquivos do Arcano Motion: pasta em outro HD e limpar cache ----------
+  function gbTexto(b) {
+    if (b >= 1073741824) { return (b / 1073741824).toFixed(1).replace('.', ',') + ' GB'; }
+    if (b >= 1048576) { return Math.round(b / 1048576) + ' MB'; }
+    return Math.max(0, Math.round(b / 1024)) + ' KB';
+  }
+  function pastaDesignPadrao() {
+    var path = R('path'), os = R('os'), p = node.process;
+    if (p.platform === 'win32') { return path.join(p.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'ArcanoDesign'); }
+    if (p.platform === 'darwin') { return path.join(os.homedir(), 'Library', 'Application Support', 'ArcanoDesign'); }
+    return path.join(os.homedir(), '.arcanodesign');
+  }
+  // As pastas de cada tipo de cache (padrão + a escolhida), só as que existem.
+  function pastasLimpeza() {
+    var path = R('path'), fs = R('fs'), os = R('os'), docs = path.join(os.homedir(), 'Documents'), esc = pastaArquivos();
+    var comum = pastaComum(), design = pastaDesignPadrao();
+    var g = {
+      temp: [path.join(os.tmpdir(), 'arcano-motion'), path.join(os.tmpdir(), 'arcano-design')].concat(esc ? [path.join(esc, 'Temporarios')] : []),
+      bib: [path.join(comum, 'Biblioteca'), path.join(design, 'Biblioteca'), path.join(comum, 'Artes'), path.join(design, 'Artes')]
+        .concat(esc ? [path.join(esc, 'Biblioteca'), path.join(esc, 'Biblioteca Design'), path.join(esc, 'Artes')] : []),
+      ia: [path.join(docs, 'Arcano Motion IA'), path.join(docs, 'Arcano Motion LUTs')]
+        .concat(esc ? [path.join(esc, 'Arcano Motion IA'), path.join(esc, 'Arcano Motion LUTs')] : [])
+    };
+    Object.keys(g).forEach(function (k) { g[k] = g[k].filter(function (d, i, a) { try { return a.indexOf(d) === i && fs.existsSync(d); } catch (e) { return false; } }); });
+    return g;
+  }
+  // Mede ou apaga (pedido.acao 'medir' | 'limpar') os arquivos mais velhos que pedido.dias. Promessa de [{ pasta, arquivos, bytes, ficam, falhas }].
+  function limpezaArquivos(pedido) {
+    if (window.ARCANO_NAVEGADOR) {
+      return window.arcanoLimpeza ? window.arcanoLimpeza(pedido) : Promise.resolve(null);
+    }
+    var fs = R('fs'), path = R('path'), apagar = pedido.acao === 'limpar';
+    var limite = Date.now() - Math.max(Number(pedido.dias) || 0, (Number(pedido.minHoras) || 0) / 24) * 86400000;
+    function andar(dir, conta, pronto) {
+      fs.readdir(dir, function (e, nomes) {
+        if (e) { pronto(); return; }
+        var i = 0;
+        function prox() {
+          if (i >= nomes.length) { pronto(); return; }
+          var p = path.join(dir, nomes[i++]);
+          fs.lstat(p, function (e2, st) {
+            if (e2 || st.isSymbolicLink()) { prox(); return; }
+            if (st.isDirectory()) {
+              andar(p, conta, function () { if (apagar) { fs.rmdir(p, function () { prox(); }); } else { prox(); } });
+              return;
+            }
+            if (st.mtime.getTime() > limite) { conta.ficam++; prox(); return; }
+            if (!apagar) { conta.arquivos++; conta.bytes += st.size; prox(); return; }
+            fs.unlink(p, function (e3) { if (e3) { conta.falhas++; } else { conta.arquivos++; conta.bytes += st.size; } prox(); });
+          });
+        }
+        prox();
+      });
+    }
+    return new Promise(function (ok) {
+      var r = [], lista = (pedido.pastas || []).slice();
+      (function proxPasta() {
+        if (!lista.length) { ok(r); return; }
+        var conta = { pasta: lista.shift(), arquivos: 0, bytes: 0, ficam: 0, falhas: 0 };
+        r.push(conta);
+        andar(conta.pasta, conta, proxPasta);
+      })();
+    });
+  }
+  function mostrarPastaArquivos() {
+    var esc = pastaArquivos();
+    $('arq-pasta').textContent = esc ? 'Agora: ' + esc : 'Agora: pasta padrão do sistema (no disco do sistema)';
+    $('arq-padrao').hidden = !esc;
+  }
+  function gravarPastaArquivos(p) {
+    var fs = R('fs');
+    garantirPasta(pastaComum());
+    fs.writeFileSync(arquivoPastas(), JSON.stringify({ arquivos: p || null }, null, 2), 'utf8');
+    pastasLidas = { t: 0, v: null };
+  }
+  function escolherPastaArquivos() {
+    if (window.ARCANO_NAVEGADOR && !(window.arcanoConectorPeloMenos && window.arcanoConectorPeloMenos('0.4.2'))) {
+      mostrarToast('Atualize o Arcano Conector para escolher outra pasta (precisa da versão 0.4.2 ou mais nova).');
+      return;
+    }
+    var fsCep = window.cep && window.cep.fs, r = null, path = R('path');
+    try {
+      if (fsCep && fsCep.showOpenDialogEx) { r = fsCep.showOpenDialogEx(false, true, amT('Escolha o HD ou a pasta dos arquivos do Arcano Motion'), pastaArquivos() || ''); }
+      else if (fsCep && fsCep.showOpenDialog) { r = fsCep.showOpenDialog(false, true, amT('Escolha o HD ou a pasta dos arquivos do Arcano Motion'), pastaArquivos() || ''); }
+    } catch (e) { r = null; }
+    var base = r && !r.err && r.data && r.data[0];
+    if (!base) { return; }
+    var destino = path.basename(base) === NOME_PASTA_ARQUIVOS ? base : path.join(base, NOME_PASTA_ARQUIVOS);
+    var antes = pastaArquivos();
+    try {
+      gravarPastaArquivos(destino);
+      garantirPasta(destino);
+      var teste = path.join(destino, '.teste-arcano');
+      R('fs').writeFileSync(teste, 'ok', 'utf8');
+      R('fs').unlinkSync(teste);
+    } catch (e) {
+      try { gravarPastaArquivos(antes); } catch (e2) {}
+      mostrarToast('Não consegui usar essa pasta: ' + (e && e.message ? e.message : e));
+      mostrarPastaArquivos();
+      return;
+    }
+    mostrarPastaArquivos();
+    mostrarToast('Pronto: os arquivos novos do Arcano Motion vão para ' + destino + '. Os antigos ficam onde estavam (use Limpar cache para tirar).');
+  }
+  var arqConfirmar = 0;
+  function rodarLimpeza(acao) {
+    var g = pastasLimpeza(), tipos = ['temp', 'bib', 'ia'], pastas = [], dono = {};
+    tipos.forEach(function (k) {
+      if (!$('arq-' + k).checked) { $('arq-' + k + '-t').textContent = ''; return; }
+      g[k].forEach(function (d) { pastas.push(d); dono[d] = k; });
+    });
+    if (!pastas.length) { $('arq-status').textContent = 'Nada marcado (ou nada para limpar ainda).'; return; }
+    var dias = Number($('arq-dias').value) || 0;
+    $('arq-status').textContent = acao === 'limpar' ? 'Limpando…' : 'Medindo…';
+    $('arq-limpar').disabled = $('arq-medir').disabled = true;
+    limpezaArquivos({ acao: acao, pastas: pastas, dias: dias, minHoras: 2 }).then(function (r) {
+      $('arq-limpar').disabled = $('arq-medir').disabled = false;
+      if (!r) { $('arq-status').textContent = 'Atualize o Arcano Conector para limpar o cache por aqui (precisa da versão 0.4.2 ou mais nova).'; return; }
+      var soma = { temp: 0, bib: 0, ia: 0 }, total = 0, arquivos = 0, falhas = 0;
+      r.forEach(function (c) { soma[dono[c.pasta]] += c.bytes; total += c.bytes; arquivos += c.arquivos; falhas += c.falhas || 0; });
+      tipos.forEach(function (k) { if ($('arq-' + k).checked) { $('arq-' + k + '-t').textContent = '· ' + gbTexto(soma[k]); } });
+      if (acao === 'limpar') {
+        arqConfirmar = 0;
+        $('arq-limpar').textContent = amT('Limpar cache');
+        $('arq-status').textContent = 'Pronto: ' + gbTexto(total) + ' liberados (' + arquivos + ' arquivos).' + (falhas ? ' ' + falhas + ' arquivos estavam em uso e ficaram.' : '');
+        tipos.forEach(function (k) { $('arq-' + k + '-t').textContent = ''; });
+      } else {
+        $('arq-status').textContent = total ? 'Dá para liberar ' + gbTexto(total) + ' (' + arquivos + ' arquivos' + (dias ? ' com mais de ' + dias + ' dias' : '') + ').' : 'Nada para limpar com esse filtro.';
+      }
+    }, function (e) {
+      $('arq-limpar').disabled = $('arq-medir').disabled = false;
+      $('arq-status').textContent = 'Não consegui: ' + (e && e.message ? e.message : e);
+    });
+  }
+  function ligarArquivosPainel() {
+    if (!$('conta-arquivos')) { return; }
+    mostrarPastaArquivos();
+    $('arq-escolher').addEventListener('click', escolherPastaArquivos);
+    $('arq-padrao').addEventListener('click', function () {
+      try { gravarPastaArquivos(null); } catch (e) {}
+      mostrarPastaArquivos();
+      mostrarToast('Pronto: os arquivos novos voltam para a pasta padrão.');
+    });
+    $('arq-abrir').addEventListener('click', function () {
+      var p = pastaArquivos() || pastaComum();
+      try { garantirPasta(p); } catch (e) {}
+      abrirPasta(p);
+    });
+    $('arq-medir').addEventListener('click', function () { arqConfirmar = 0; $('arq-limpar').textContent = amT('Limpar cache'); rodarLimpeza('medir'); });
+    // 1º clique mede e pede confirmação; 2º (em até 15 s) apaga
+    $('arq-limpar').addEventListener('click', function () {
+      if (arqConfirmar && Date.now() - arqConfirmar < 15000) { rodarLimpeza('limpar'); return; }
+      arqConfirmar = Date.now();
+      $('arq-limpar').textContent = amT('Clique de novo para apagar');
+      rodarLimpeza('medir');
+      setTimeout(function () { if (arqConfirmar && Date.now() - arqConfirmar >= 15000) { arqConfirmar = 0; $('arq-limpar').textContent = amT('Limpar cache'); } }, 15500);
+    });
+    ['arq-temp', 'arq-bib', 'arq-ia', 'arq-dias'].forEach(function (id) {
+      $(id).addEventListener('change', function () { arqConfirmar = 0; $('arq-limpar').textContent = amT('Limpar cache'); $('arq-status').textContent = ''; });
+    });
+  }
+
   function ligarConta2() {
+    ligarArquivosPainel();
     if ($('conta-ia-sempre')) {
       $('conta-ia-sempre').checked = !!cfg.iaSempreAprovar;
       $('conta-ia-sempre').addEventListener('change', function () { cfg.iaSempreAprovar = $('conta-ia-sempre').checked; try { salvarConfig(); } catch (e) {} });

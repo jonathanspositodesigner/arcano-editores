@@ -185,3 +185,28 @@ window.ARCANO_I18N = {"exato": {"Skill Arcano Design": ["Arcano Design Skill", "
   var e = { "Lendo um trecho guardado": ["Reading a saved excerpt", "Leyendo un fragmento guardado"] };
   for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
 })(window.ARCANO_I18N);
+
+/* Arquivos do Arcano Motion e limpar cache (1.2.35) */
+(function (D) {
+  var e = {
+    "Arquivos do Arcano Motion": ["Arcano Motion files", "Archivos de Arcano Motion"],
+    "Onde o painel guarda o que gera e baixa: temporários, Biblioteca, imagens e áudios da IA (quando o projeto ainda não foi salvo) e LUTs. Escolha outro HD se o seu disco estiver cheio. Conta e configurações continuam no lugar de sempre.": ["Where the panel keeps what it creates and downloads: temporary files, Library, AI images and audio (when the project isn't saved yet) and LUTs. Pick another drive if your disk is full. Account and settings stay where they always are.", "Donde el panel guarda lo que genera y descarga: temporales, Biblioteca, imágenes y audios de la IA (cuando el proyecto aún no se guardó) y LUTs. Elige otro disco si el tuyo está lleno. La cuenta y la configuración siguen en el lugar de siempre."],
+    "Escolher pasta ou HD…": ["Choose folder or drive…", "Elegir carpeta o disco…"],
+    "Abrir a pasta": ["Open folder", "Abrir la carpeta"],
+    "Voltar ao padrão": ["Back to default", "Volver a lo predeterminado"],
+    "Limpar cache": ["Clear cache", "Limpiar caché"],
+    "Apaga o que o Arcano Motion gerou e baixou e já está velho. A Biblioteca baixa de novo quando você usar. Atenção: projeto que usa um arquivo apagado vai mostrar o arquivo como faltando.": ["Deletes old files Arcano Motion created and downloaded. The Library downloads again when you use it. Note: a project that uses a deleted file will show it as missing.", "Borra lo viejo que Arcano Motion generó y descargó. La Biblioteca se descarga de nuevo cuando la uses. Atención: un proyecto que usa un archivo borrado lo mostrará como faltante."],
+    "Temporários (prévias, revisões, downloads por link)": ["Temporary files (previews, reviews, link downloads)", "Temporales (vistas previas, revisiones, descargas por enlace)"],
+    "Biblioteca e artes baixadas": ["Downloaded Library and artworks", "Biblioteca y artes descargadas"],
+    "Arquivos que a IA gerou sem projeto salvo e LUTs": ["AI files created without a saved project, and LUTs", "Archivos que la IA generó sin proyecto guardado y LUTs"],
+    "Apagar os com mais de": ["Delete the ones older than", "Borrar los de más de"],
+    "qualquer idade": ["any age", "cualquier edad"],
+    "7 dias": ["7 days", "7 días"],
+    "30 dias": ["30 days", "30 días"],
+    "90 dias": ["90 days", "90 días"],
+    "Ver quanto ocupa": ["See how much space", "Ver cuánto ocupa"],
+    "Clique de novo para apagar": ["Click again to delete", "Haz clic de nuevo para borrar"],
+    "Escolha o HD ou a pasta dos arquivos do Arcano Motion": ["Choose the drive or folder for Arcano Motion files", "Elige el disco o la carpeta de los archivos de Arcano Motion"]
+  };
+  for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
+})(window.ARCANO_I18N);
