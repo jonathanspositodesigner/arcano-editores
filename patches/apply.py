@@ -315,6 +315,7 @@ pub(crate) const GATE: &str =""")
     psd_fiel(r)
     fontes_pc(r)
     projeto_after(r)
+    carregando(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
           "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
@@ -433,6 +434,23 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
+def carregando(r):
+    """Telas de "Carregando seu arquivo…" (importar/abrir trava o editor: o comando espera a tela
+    aparecer) e "Gerando a prévia…" até o primeiro quadro da composição (arquivos/ui-arcano-carregando.rs)."""
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-carregando.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_carregando.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod menus;\n", "pub mod arcano_carregando;\npub mod menus;\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs", "        panels::dialogs::show(self, &ctx);\n",
+          "        panels::dialogs::show(self, &ctx);\n        crate::arcano_carregando::quadro(self, &ctx);\n")
+    troca(r, "crates/ui-egui/src/menus/invoke.rs",
+          "pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {\n",
+          "pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {\n"
+          "    if crate::arcano_carregando::adiar(id, &params) {\n        ctx.request_repaint();\n        return Ok(serde_json::json!({\"adiado\": true}));\n    }\n")
+    troca(r, "apps/effectcraft-web/src/app.rs",
+          '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {',
+          '    if !media.is_empty() && effectcraft_ui_egui::arcano_carregando::adiar("file.import", &json!({"paths": media.clone()})) {\n        return;\n    }\n'
+          '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {')
+
+
 def projeto_after(r):
     """Projeto do After (.aep/.aet) jogado no editor de vídeo: o file.import guarda numa fila e o
     painel do Arcano Motion monta o projeto inteiro numa pasta (arquivos/engine-arcano-aep.rs; quem
@@ -473,6 +491,14 @@ def psd_fiel(r):
     - recorte (clipping) só dentro da camada base, como no Photoshop: virou matte de alfa da base. O
       "preservar transparência" usava tudo o que está embaixo e, em grupo atravessado, a textura do
       título virava um retângulo por cima da arte."""
+    # Preenchimento (Fill) de camada de ajuste: no Photoshop age como a opacidade (Matiz/Saturação
+    # com preenchimento 15% = efeito a 15%). Camada de ajuste não tem estilo, então entrava 100%.
+    troca(r, "crates/engine/src/interchange/psd_import.rs",
+          "    if pl.fill_opacity < 255 && layer.can_have_styles() {\n",
+          "    if pl.fill_opacity < 255 && layer.switches.adjustment {\n"
+          "        set_scalar(&mut layer, \"transform/opacity\", pl.opacity as f64 / 255.0 * pl.fill_opacity as f64 / 255.0 * 100.0);\n"
+          "    }\n"
+          "    if pl.fill_opacity < 255 && layer.can_have_styles() {\n")
     ed = "crates/psd/src/engine_data.rs"
     troca(r, ed, 'pub fn text_style(ed: &EValue) -> TextStyle {\n    let engine = ed.get("EngineDict").unwrap_or(ed);',
           'pub fn text_style(ed: &EValue) -> TextStyle {\n    text_style_at(ed, 0)\n}\n\n'
@@ -619,14 +645,21 @@ def psd_fiel(r):
           "        }\n"
           "    }\n")
     troca(r, pi, "    for n in nodes {\n        if let Some(l) = build_layer(proj, cx, &comp, n) {\n            comp.layers.push(l);\n        }\n    }\n    styles::sync_comp(&mut comp);",
-          "    for n in nodes {\n        if let Some(l) = build_layer(proj, cx, &comp, n) {\n            comp.layers.push(l);\n        }\n    }\n"
+          "    // Arcano: máscara de pixels de grupo/objeto inteligente/texto/ajuste = camada de máscara (mate de alfa)\n"
+          "    let mut mates_de_mascara: Vec<effectcraft_project::LayerId> = Vec::new();\n"
+          "    for n in nodes {\n        if let Some(mut l) = build_layer(proj, cx, &comp, n) {\n"
+          "            if let Some(m) = mascara_psd(proj, cx, &comp, n, &mut l) {\n"
+          "                mates_de_mascara.push(m.id);\n"
+          "                comp.layers.push(m);\n"
+          "            }\n"
+          "            comp.layers.push(l);\n        }\n    }\n"
           "    // Arcano: recorte (clipping) = só dentro da camada base (a 1ª sem recorte abaixo), como no Photoshop.\n"
           "    let recortes: Vec<(usize, Option<(effectcraft_project::LayerId, bool)>)> = comp\n"
           "        .layers\n"
           "        .iter()\n"
           "        .enumerate()\n"
           "        .filter(|(_, l)| l.preserve_transparency)\n"
-          "        .map(|(k, _)| (k, comp.layers.iter().skip(k + 1).find(|l| !l.preserve_transparency).map(|b| (b.id, b.switches.video))))\n"
+          "        .map(|(k, _)| (k, comp.layers.iter().skip(k + 1).find(|l| !l.preserve_transparency && !mates_de_mascara.contains(&l.id)).map(|b| (b.id, b.switches.video))))\n"
           "        .collect();\n"
           "    for (k, base) in recortes {\n"
           "        if let (Some((id, visivel)), Some(l)) = (base, comp.layers.get_mut(k)) {\n"
@@ -638,6 +671,130 @@ def psd_fiel(r):
           "        }\n"
           "    }\n"
           "    styles::sync_comp(&mut comp);")
+    mascaras_psd(r)
+
+
+def mascaras_psd(r):
+    """Máscara de pixels (máscara de camada) em grupo (pré-composição), objeto inteligente, texto
+    editável e camada de ajuste: antes era descartada (só a camada de pixels já vinha recortada).
+    Agora vira uma camada de máscara escondida logo acima, usada como mate de alfa (footage do
+    próprio PSD só com a máscara: SourceLayer.embedded = "arcano:mascara")."""
+    pi = "crates/engine/src/interchange/psd_import.rs"
+    troca(r, "crates/psd/src/pixels.rs",
+          "    pub fn layer_pixels(&self, index: usize, canvas: bool) -> Result<Pixels> {\n",
+          "    /// Arcano: só a máscara de pixels da camada (branco, alfa = máscara), no tamanho do documento.\n"
+          "    pub fn layer_mask_pixels(&self, index: usize) -> Result<Pixels> {\n"
+          "        let mut budget = Budget::new(DECODE_BUDGET);\n"
+          "        let l = self.layers.get(index).ok_or_else(|| Error::Invalid(format!(\"no layer {index}\")))?;\n"
+          "        let doc = Rect { top: 0, left: 0, bottom: self.height as i32, right: self.width as i32 };\n"
+          "        let n = decode_pixels(self.width as usize, self.height as usize)?;\n"
+          "        budget.check(16 * n as u64)?;\n"
+          "        let mut out = budget.filled(n, [1.0f32; 4])?;\n"
+          "        self.apply_layer_mask(l, doc, &mut out, &mut budget)?;\n"
+          "        Ok(Pixels { width: self.width, height: self.height, data: out })\n"
+          "    }\n\n"
+          "    pub fn layer_pixels(&self, index: usize, canvas: bool) -> Result<Pixels> {\n")
+    troca(r, "crates/media/src/layered.rs",
+          "        // A smart object's embedded file: an embedded document's merged image, or an image.\n",
+          "        // Arcano: a máscara de pixels de uma camada (mate de grupo/objeto inteligente/texto/ajuste).\n"
+          "        if let Some(l) = footage.layer.as_ref()\n"
+          "            && l.embedded.as_deref() == Some(\"arcano:mascara\")\n"
+          "        {\n"
+          "            let px = psd.layer_mask_pixels(l.index as usize).map_err(|e| MediaError::Decode(format!(\"{path}: {e}\")))?;\n"
+          "            return Ok(Some(straight_to_image(px.width, px.height, &px.data, op)));\n"
+          "        }\n"
+          "        // A smart object's embedded file: an embedded document's merged image, or an image.\n")
+    troca(r, "crates/media/src/pool.rs",
+          "+ if l.embedded.is_some() { 1 << 40 } else { 0 })",
+          "+ if l.embedded.is_some() { 1 << 40 } else { 0 } + if l.embedded.as_deref() == Some(\"arcano:mascara\") { 1 << 41 } else { 0 })")
+    p = pathlib.Path(r) / pi
+    p.write_text(p.read_text(encoding="utf-8") + MASCARA_PSD_RS, encoding="utf-8")
+
+
+MASCARA_PSD_RS = """
+/// Arcano: a máscara de pixels de uma camada que não vem recortada pelo PSD (grupo, objeto
+/// inteligente, texto editável, ajuste): uma camada escondida com só a máscara, logo acima, e a
+/// camada usa ela como mate de alfa. Camada de pixels já vem com a máscara aplicada.
+fn mascara_psd(proj: &mut Project, cx: &mut Ctx, comp: &Comp, n: &Node, l: &mut Layer) -> Option<Layer> {
+    let index = match n {
+        Node::Layer(i) => *i,
+        Node::Group { layer, .. } => *layer,
+    };
+    let pl = cx.psd.layers.get(index)?.clone();
+    let m = pl.mask.filter(|m| !m.disabled)?;
+    if m.rect.is_empty() || !pl.channels.iter().any(|c| c.id == -2) {
+        return None;
+    }
+    let assada = match l.source {
+        LayerSource::Footage { item } => {
+            matches!(proj.item(item).map(|i| &i.kind), Some(ItemKind::Footage(f)) if f.layer.as_ref().is_some_and(|s| s.embedded.is_none()))
+        }
+        _ => false,
+    };
+    if assada {
+        return None;
+    }
+    let nome = if pl.name.is_empty() { format!("Layer {}", index + 1) } else { pl.name.clone() };
+    if l.track_matte.is_some() || l.preserve_transparency {
+        cx.warnings.push(format!("{nome}: máscara de camada junto com recorte (só o recorte entrou)"));
+        return None;
+    }
+    let file = std::path::Path::new(cx.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let f = Footage {
+        path: cx.path.to_string(),
+        kind: FootageKind::Still,
+        width: cx.psd.width,
+        height: cx.psd.height,
+        pixel_aspect: 1.0,
+        frame_rate: cx.rate,
+        native_rate: None,
+        duration: Tick::ZERO,
+        has_video: true,
+        has_audio: false,
+        alpha: AlphaMode::Straight,
+        premul_color: [0.0; 3],
+        loop_count: 1,
+        codec: "PSD".into(),
+        missing: false,
+        sequence: vec![],
+        color_profile: None,
+        layer: Some(SourceLayer { index: index as u32, name: pl.name.clone(), layer_size: false, embedded: Some("arcano:mascara".into()), placed: false }),
+        ..Default::default()
+    };
+    let item = proj.add_item(&format!("{nome} (máscara)/{file}"), Label::Lavender, Some(cx.folder), ItemKind::Footage(f));
+    cx.items.push(item);
+    // Grupo "atravessar" (pass-through): as camadas dele se misturam com o que está embaixo; um mate
+    // no grupo inteiro isolaria o grupo (os modos Tela/Adição viravam mancha). A máscara vai DENTRO,
+    // em cada camada do grupo.
+    if let LayerSource::Comp { item: sub } = l.source
+        && l.switches.collapse
+    {
+        let base = match proj.item(sub).map(|i| &i.kind) {
+            Some(ItemKind::Comp(c)) => (**c).clone(),
+            _ => return None,
+        };
+        let mut ml = build::layer(proj, &base, &format!("{nome} · máscara"), LayerSource::Footage { item }, (cx.psd.width, cx.psd.height), None);
+        ml.switches.video = false;
+        let id = ml.id;
+        if let Some(it) = proj.item_mut(sub)
+            && let ItemKind::Comp(c) = &mut it.kind
+        {
+            let c = Arc::make_mut(c);
+            for f in c.layers.iter_mut() {
+                if f.track_matte.is_none() {
+                    f.track_matte = Some(effectcraft_project::TrackMatte { layer: id, kind: effectcraft_project::MatteKind::Alpha });
+                }
+            }
+            c.layers.insert(0, ml);
+        }
+        return None;
+    }
+    let mut ml = build::layer(proj, comp, &format!("{nome} · máscara"), LayerSource::Footage { item }, (cx.psd.width, cx.psd.height), None);
+    ml.switches.video = false;
+    l.track_matte = Some(effectcraft_project::TrackMatte { layer: ml.id, kind: effectcraft_project::MatteKind::Alpha });
+    Some(ml)
+}
+"""
 
 
 def painel_pc_video(r):
