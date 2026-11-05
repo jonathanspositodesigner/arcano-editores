@@ -47,13 +47,14 @@ pub struct Painel {
     so_ferramentas: bool,
 }
 
-/// Abre a aba Ferramentas do Photoshop (efeitos-ps) assim que o plugin monta as abas e esconde a barra
-/// de abas. Clica uma vez só: depois a pessoa navega pelas ferramentas (Separar em camadas…) à vontade.
+/// Painel de cima (só ferramentas): abre a aba Ferramentas do Photoshop (efeitos-ps), esconde a barra de
+/// abas e NUNCA sai das ferramentas. Só valem a lista de ferramentas e as telas delas (Separar em
+/// camadas); se o plugin pular para o chat (ex.: a IA revisar depois de decompor) ou outra aba, volta na hora.
 const SCRIPT_SO_FERRAMENTAS: &str = r#"(function () {
   if (window.top !== window) { return; }
   window.ARCANO_SO_FERRAMENTAS = true;
-  var n = 0, t = setInterval(function () {
-    n++;
+  var PERMITIDOS = { 'painel-efeitos-ps': 1, 'painel-camadas': 1 };
+  setInterval(function () {
     if (document.head && !document.getElementById('arcano-so-ferramentas')) {
       var s = document.createElement('style');
       s.id = 'arcano-so-ferramentas';
@@ -61,9 +62,18 @@ const SCRIPT_SO_FERRAMENTAS: &str = r#"(function () {
       document.head.appendChild(s);
     }
     var b = document.querySelector('.aba[data-aba="efeitos-ps"]');
-    if (b) { if (!b.classList.contains('ativa')) { b.click(); } clearInterval(t); }
-    else if (n > 1200) { clearInterval(t); }
-  }, 250);
+    if (!b) { return; }
+    var fora = false, algum = false;
+    var m = document.getElementById('mensagens'), cfgIA = document.getElementById('chat-config');
+    if ((m && !m.hidden) || (cfgIA && !cfgIA.hidden)) { fora = true; }
+    var ps = document.querySelectorAll('.painel-aba');
+    for (var i = 0; i < ps.length; i++) {
+      if (ps[i].hidden) { continue; }
+      algum = true;
+      if (!PERMITIDOS[ps[i].id]) { fora = true; }
+    }
+    if (fora || !algum) { b.click(); }
+  }, 400);
 })();"#;
 
 impl Painel {
