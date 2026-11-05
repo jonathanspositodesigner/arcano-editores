@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   cli:
@@ -43,7 +43,9 @@ jobs:
           src/target/release/photocraft-cli commands --help > saida/comandos-ajuda.txt 2>&1 || true
           src/target/release/photocraft-cli serve --help > saida/serve-ajuda.txt 2>&1 || true
           ls -la saida
-      - uses: actions/upload-artifact@v4
-        with:
-          name: photocraft-cli
-          path: saida/
+      - name: Guardar no ramo ferramentas (o artefato do Actions não baixa daqui)
+        run: |
+          cd saida && gzip -9 photocraft-cli && ls -la
+          git init -q -b ferramentas . && git config user.name arcano-build && git config user.email arcano-build@users.noreply.github.com
+          git add -A && git commit -qm "photocraft-cli ${PHOTOCRAFT_REF}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ferramentas
