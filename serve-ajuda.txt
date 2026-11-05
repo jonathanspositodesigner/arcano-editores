@@ -1,0 +1,30 @@
+Keep one headless session open and answer JSON lines on stdio, or on 127.0.0.1:<PORT>
+
+Each request is a JSON line {"id", "method", "params"}. Methods: engine.execute, jobs.list/cancel, engine.commands, doc.open/new/place/save/exportLayers/exportDataSets/importDataSets/inspect/render/select/close, session.list, batch, methods (docs/control-protocol.md#headless-server). The token flags require --port (or PHOTOCRAFT_CONTROL_PORT); stdio needs no control token.
+
+Usage: photocraft-cli serve [OPTIONS]
+
+Options:
+      --port <PORT>
+          Listen on 127.0.0.1:<PORT> instead of stdio
+          
+          [env: PHOTOCRAFT_CONTROL_PORT=]
+
+      --control-token <64-HEX>
+          The control token (64 hex digits)
+          
+          [env: PHOTOCRAFT_CONTROL_TOKEN]
+
+      --control-token-file <PATH>
+          A file holding the control token, used instead of --control-token (a server creates it when missing)
+          
+          [env: PHOTOCRAFT_CONTROL_TOKEN_FILE=]
+
+      --automation-read-root <DIR>
+          The folder automation may read from (none without it)
+
+      --automation-write-root <DIR>
+          The folder automation may write to (none without it)
+
+  -h, --help
+          Print help (see a summary with '-h')

@@ -1,0 +1,8 @@
+List the engine command registry
+
+Usage: photocraft-cli commands [OPTIONS]
+
+Options:
+      --json           Print the entries as JSON
+      --filter <TEXT>  Only the commands matching this text
+  -h, --help           Print help
