@@ -6,6 +6,8 @@
 (function () {
   'use strict';
   window.ARCANO_GANCHO_IMAGEM = true;
+  // Porta (login do ArcanoApp) e o botão de baixar pro PC quando o navegador não aguenta.
+  ['porta.js', 'falha.js'].forEach(function (n) { var s = document.createElement('script'); s.src = '../painel/' + n; document.head.appendChild(s); });
   // Botão de voltar ao ArcanoApp.
   (function () { var s = document.createElement('script'); s.src = '../painel/voltar.js'; document.head.appendChild(s); })();
 })();
