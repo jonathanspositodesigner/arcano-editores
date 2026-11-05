@@ -114,6 +114,24 @@ def photocraft(r):
     troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(16, 98, 196)", "accent_text: Color32::from_rgb(126, 34, 206)")
     # Ícone do canto superior esquerdo (onde o Photoshop mostra o "Ps").
     copia(ASSETS / "arcano-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
+    # Painel do Arcano Design (o plugin do Photoshop) falando com o editor de forma síncrona
+    # (window.photocraftArcano, carregado pelo montar-imagem.js): apps/photocraft-web/src/arcano.rs.
+    copia(pathlib.Path(__file__).parent / "arquivos/photocraft-web-arcano.rs", pathlib.Path(r) / "apps/photocraft-web/src/arcano.rs")
+    troca(r, "apps/photocraft-web/src/main.rs", "#[cfg(target_arch = \"wasm32\")]\nmod web;",
+          "#[cfg(target_arch = \"wasm32\")]\nmod web;\n\n#[cfg(target_arch = \"wasm32\")]\nmod arcano;")
+    troca(r, "apps/photocraft-web/src/web.rs", "    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {\n",
+          "    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {\n        crate::arcano::entrar(&mut self.app, ctx);\n")
+    troca(r, "apps/photocraft-web/src/web.rs", "        self.save_presets(ctx);\n        self.app.finish_type_reset_logic(ctx);\n    }",
+          "        self.save_presets(ctx);\n        self.app.finish_type_reset_logic(ctx);\n        crate::arcano::sair();\n    }")
+    troca(r, "apps/photocraft-web/src/web.rs", "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n",
+          "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        crate::arcano::entrar(&mut self.app, ui.ctx());\n")
+    troca(r, "apps/photocraft-web/src/web.rs", "        self.app.finish_type_reset_pass(ui.ctx());\n    }",
+          "        self.app.finish_type_reset_pass(ui.ctx());\n        crate::arcano::sair();\n    }")
+    troca(r, "crates/ui-egui/src/file_open.rs", "    pub(crate) fn place_bytes(&mut self,", "    pub fn place_bytes(&mut self,")
+    # arcano.rs guarda onde o app está entre quadros (um ponteiro, ver o SAFETY lá): este crate sai do
+    # "unsafe proibido" do workspace (o resto do editor continua com ele).
+    troca(r, "apps/photocraft-web/Cargo.toml", "[lints]\nworkspace = true\n", "")
+    troca(r, "apps/photocraft-web/Cargo.toml", 'js-sys = "0.3"\n', 'js-sys = "0.3"\nserde_json = { workspace = true }\n')
     # Nome deles em qualquer texto que sobrou (menus, mensagens, traduções .tsv).
     nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "apps/photocraft-web", "apps/photocraft-web-boot"),
                     nomes=(("PhotoCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
@@ -390,20 +408,10 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
-PAINEL_PC_VIDEO = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=video"
-
-
-def painel_pc_video(r):
-    """Programa de PC (vídeo): o painel do Arcano Motion (o MESMO do After) abre numa janela do
-    Chrome/Edge ao lado do programa e manda os scripts pelo Arcano Conector para o canal local do
-    programa (127.0.0.1:47890, só JSON por linha; pedido de página web é recusado na 1ª linha)."""
-    m = "apps/effectcraft/src/main.rs"
-    troca(r, m, "            if let Some(port) = control_port {\n                disable_app_nap();",
-          "            if control_port.is_none() {\n                abrir_painel_arcano();\n            }\n"
-          "            if let Some(port) = control_port.or(Some(ARCANO_PORTA)) {\n                disable_app_nap();")
-    troca(r, m, "/// Driven by an agent (`--control`): don't activate the app on launch",
-          """/// Canal do painel Arcano Motion (o conector conversa com o programa por aqui).
-const ARCANO_PORTA: u16 = 47890;
+def abridor(url, porta):
+    """Rust: a porta do canal do painel e a função que abre o painel numa janela do Chrome/Edge."""
+    return """/// Canal do painel Arcano Motion (o conector conversa com o programa por aqui).
+const ARCANO_PORTA: u16 = {PORTA};
 
 /// Abre o painel do Arcano Motion numa janela própria do Chrome ou do Edge (sem abas), ou no
 /// navegador padrão se nenhum dos dois estiver instalado.
@@ -449,10 +457,94 @@ fn abrir_painel_arcano() {
     });
 }
 
-/// Driven by an agent (`--control`): don't activate the app on launch""".replace("{PAINEL}", PAINEL_PC_VIDEO))
+""".replace("{PAINEL}", url).replace("{PORTA}", str(porta))
+
+
+PAINEL_PC_VIDEO = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=video"
+
+
+def painel_pc_video(r):
+    """Programa de PC (vídeo): o painel do Arcano Motion (o MESMO do After) abre numa janela do
+    Chrome/Edge ao lado do programa e manda os scripts pelo Arcano Conector para o canal local do
+    programa (127.0.0.1:47890, só JSON por linha; pedido de página web é recusado na 1ª linha)."""
+    m = "apps/effectcraft/src/main.rs"
+    troca(r, m, "            if let Some(port) = control_port {\n                disable_app_nap();",
+          "            if control_port.is_none() {\n                abrir_painel_arcano();\n            }\n"
+          "            if let Some(port) = control_port.or(Some(ARCANO_PORTA)) {\n                disable_app_nap();")
+    troca(r, m, "/// Driven by an agent (`--control`): don't activate the app on launch",
+          abridor(PAINEL_PC_VIDEO, 47890) + "/// Driven by an agent (`--control`): don't activate the app on launch")
     # Menu Ajuda do programa de PC: reabrir o painel (o link "página do app" vira o painel).
     troca(r, "crates/engine/src/menus.rs", "  Entrar no grupo do WhatsApp | help.discord\n", "  Painel do Arcano Motion | help.appPage\n  ---\n  Entrar no grupo do WhatsApp | help.discord\n")
     troca(r, "crates/engine/src/home/links.rs", f'pub const APP_PAGE: &str = "{VOLTAR}";', f'pub const APP_PAGE: &str = "{PAINEL_PC_VIDEO}";')
+
+
+PAINEL_PC_IMAGEM = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=imagem"
+
+
+def painel_pc_imagem(r):
+    """Programa de PC (imagem): o painel do Arcano Design abre numa janela do Chrome/Edge e fala com o
+    programa pelo canal de controle dele (127.0.0.1:47891), que pede a senha (token) guardada em
+    ArcanoDesign/controle.token na pasta do usuário (o conector lê de lá)."""
+    m = "apps/photocraft/src/main.rs"
+    troca(r, m, "    let control = control_setup(control_port, auth, &automation);",
+          "    let (auth, automation) = arcano_controle(control_port, auth, automation);\n"
+          "    let control = control_setup(control_port.or(Some(ARCANO_PORTA)), auth, &automation);\n"
+          "    if control_port.is_none() {\n        abrir_painel_arcano();\n    }")
+    troca(r, m, """        Err(error) => {
+            eprintln!("photocraft: control server failed to bind 127.0.0.1:{port}: {error}");
+            std::process::exit(2);
+        }""", """        Err(error) => {
+            eprintln!("photocraft: control server failed to bind 127.0.0.1:{port}: {error}");
+            if port == ARCANO_PORTA {
+                return None;
+            }
+            std::process::exit(2);
+        }""")
+    troca(r, m, "/// The control server's port, token and workspace, when it is on (exits 2 on a bad configuration).",
+          abridor(PAINEL_PC_IMAGEM, 47891) + """
+/// O token do canal do painel (ArcanoDesign/controle.token, criado na 1ª vez) e as pastas que o
+/// painel pode abrir/gravar pelo canal, quando nada disso veio na linha de comando.
+fn arcano_controle(
+    cli_port: Option<u16>,
+    mut auth: photocraft_automation::args::ControlArgs,
+    mut automation: photocraft_automation::args::AutomationArgs,
+) -> (photocraft_automation::args::ControlArgs, photocraft_automation::args::AutomationArgs) {
+    if cli_port.is_some() {
+        return (auth, automation);
+    }
+    let casa = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from);
+    let pasta = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(std::path::PathBuf::from).map(|p| p.join("ArcanoDesign"))
+    } else if cfg!(target_os = "macos") {
+        casa.clone().map(|p| p.join("Library/Application Support/ArcanoDesign"))
+    } else {
+        casa.clone().map(|p| p.join(".arcanodesign"))
+    };
+    if auth.control_token.is_none() && auth.control_token_file.is_none()
+        && let Some(pasta) = pasta
+        && std::fs::create_dir_all(&pasta).is_ok()
+    {
+        auth.control_token_file = Some(pasta.join("controle.token"));
+    }
+    let raiz = if cfg!(windows) {
+        std::path::PathBuf::from(format!("{}\\\\", std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into())))
+    } else {
+        std::path::PathBuf::from("/")
+    };
+    if automation.automation_read_root.is_none() {
+        automation.automation_read_root = Some(raiz.clone());
+    }
+    if automation.automation_write_root.is_none() {
+        automation.automation_write_root = Some(raiz);
+    }
+    (auth, automation)
+}
+
+/// The control server's port, token and workspace, when it is on (exits 2 on a bad configuration).""")
+    # Menu Ajuda: reabrir o painel.
+    troca(r, "crates/engine/src/shell_commands.rs", '    ("help.website", "Voltar ao início", &["Help"], None),\n',
+          '    ("help.github", "Painel do Arcano Design", &["Help"], None),\n    ("help.website", "Voltar ao início", &["Help"], None),\n')
+    troca(r, "crates/ui-egui/src/links.rs", f'pub const GITHUB: &str = "{VOLTAR}";', f'pub const GITHUB: &str = "{PAINEL_PC_IMAGEM}";')
 
 
 def desktop(app, raiz):
@@ -467,6 +559,7 @@ def desktop(app, raiz):
         nomes_restantes(raiz, pastas=("apps/effectcraft/src",), nomes=nomes)
     else:
         icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
+        painel_pc_imagem(raiz)
         nomes_restantes(raiz, pastas=("apps/photocraft/src",), nomes=nomes)
 
 

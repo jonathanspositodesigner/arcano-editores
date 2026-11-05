@@ -902,7 +902,15 @@ function opServidor(sid) {
 // Programa de PC do Arcano Layers (vídeo): o painel do plugin roda numa janela do navegador e o
 // ExtendScript vai para o editor instalado pelo canal de controle local (127.0.0.1:47890). Só
 // script.run passa (o script do editor só grava nas pastas do Arcano: regra do próprio editor).
-const PORTA_EDITOR_PC = { video: 47890 };
+const PORTA_EDITOR_PC = { video: 47890, imagem: 47891 };
+// O programa de imagem pede senha no canal: ele grava em ArcanoDesign/controle.token (pasta do usuário).
+function tokenImagem() {
+  const os = require('os'), path = require('path'), fs = require('fs');
+  const base = process.platform === 'win32' ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
+    : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : null;
+  const arq = base ? path.join(base, 'ArcanoDesign', 'controle.token') : path.join(os.homedir(), '.arcanodesign', 'controle.token');
+  try { return fs.readFileSync(arq, 'utf8').trim(); } catch (e) { return null; }
+}
 const conexoesEditor = new Map();
 function conexaoEditor(app) {
   const porta = PORTA_EDITOR_PC[app];
@@ -914,7 +922,15 @@ function conexaoEditor(app) {
     const sock = net.connect({ host: '127.0.0.1', port: porta });
     const con = { sock, fechada: false, seq: 0, esperando: new Map(), resto: '' };
     sock.setEncoding('utf8');
-    sock.on('connect', () => { conexoesEditor.set(app, con); resolve(con); });
+    sock.on('connect', () => {
+      if (app !== 'imagem') { conexoesEditor.set(app, con); resolve(con); return; }
+      const token = tokenImagem();
+      if (!token) { sock.destroy(); reject(new Error('o programa do Arcano Layers Imagem não está aberto')); return; }
+      con.esperando.set('auth', (r) => {
+        if (r.ok) { conexoesEditor.set(app, con); resolve(con); } else { sock.destroy(); reject(new Error('o programa recusou a senha do canal: ' + (r.error || ''))); }
+      });
+      sock.write(JSON.stringify({ id: 'auth', method: 'auth', params: { token } }) + '\n');
+    });
     sock.on('data', (d) => {
       con.resto += d;
       let i;
@@ -936,6 +952,22 @@ function conexaoEditor(app) {
     sock.on('close', () => fechar());
   });
 }
+// Um pedido qualquer do canal (o painel do Arcano Design imita o Photoshop em cima deles).
+// Métodos permitidos: os do canal de controle do programa, menos fechar o programa.
+async function pedidoEditorPC(app, metodo, params) {
+  metodo = String(metodo || '');
+  if (!/^[a-z][A-Za-z0-9.]*$/.test(metodo) || metodo === 'app.quit' || metodo === 'auth') throw new Error('pedido não permitido: ' + metodo);
+  const con = await conexaoEditor(app);
+  const id = ++con.seq;
+  const r = await new Promise((resolve) => {
+    const t = setTimeout(() => { con.esperando.delete(id); resolve({ ok: false, error: 'o programa não respondeu em 10 minutos' }); }, 600000);
+    con.esperando.set(id, (x) => { clearTimeout(t); resolve(x); });
+    con.sock.write(JSON.stringify({ id, method: metodo, params: params && typeof params === 'object' ? params : {} }) + '\n');
+  });
+  if (!r.ok) throw new Error(String(r.error || 'erro no programa'));
+  return r.result;
+}
+
 async function opEditorPC(c) {
   const codigo = String(c.codigo || '');
   if (codigo.length > 64 * 1048576) throw new Error('script grande demais');
@@ -966,6 +998,7 @@ async function tratarPlugin2(url, json, c) {
     case '/plugin/achar': await tentar(() => opAcharPrograma(c)); return true;
     case '/plugin/janela': await tentar(() => opJanela(c)); return true;
     case '/plugin/editorpc': await tentar(() => opEditorPC(c)); return true;
+    case '/plugin/editorpc/pedido': await tentar(() => pedidoEditorPC(String(c.app || 'imagem'), c.metodo, c.params)); return true;
     case '/plugin/editorpc/aberto': await tentar(() => conexaoEditor(String(c.app || 'video')).then(() => true, () => false)); return true;
     case '/plugin/servidor': await tentar(() => opServidor(sid)); return true;
     case '/plugin/servidor/fechar': await tentar(() => { const s = servidoresPlugin.get(c.id); if (s) { s.close(); servidoresPlugin.delete(c.id); } return true; }); return true;

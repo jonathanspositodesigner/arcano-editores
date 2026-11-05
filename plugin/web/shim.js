@@ -618,7 +618,65 @@
   }
   // Programa de PC (?pc=video): o painel está numa janela do navegador ao lado do programa instalado;
   // o script vai direto para ele pelo conector (os arquivos já estão no PC, nada para copiar).
-  var MODO_PC = (/[?&]pc=(video)\b/.exec(location.search) || [])[1] || null;
+  var MODO_PC = (/[?&]pc=(video|imagem)\b/.exec(location.search) || [])[1] || null;
+  // Photoshop (Arcano Design): no editor de imagem (?host=ps) ou no programa de PC de imagem (?pc=imagem).
+  var MODO_PS = /[?&]host=ps\b/.test(location.search) || MODO_PC === 'imagem';
+  var ps = null;
+  function transportePS() {
+    if (MODO_PC === 'imagem') {
+      // programa de PC: cada pedido vai síncrono ao conector, que fala com o programa (canal com senha)
+      var ped = function (metodo, params) { return sincrono('/plugin/editorpc/pedido', { app: 'imagem', metodo: metodo, params: params || {} }); };
+      var cmd = function (c, p) { return ped('engine.execute', { command: c, params: p || {} }); };
+      var ativo = function () { return (cmd('document.activate', { offset: 0 }) || {}).document; };
+      return {
+        pedido: ped,
+        abrir: function (caminho) { return ped('app.open', { path: caminho }); },
+        // o canal do programa não coloca arquivo direto: abre, copia as camadas para o documento e fecha
+        colocar: function (caminho) {
+          var alvo = ativo();
+          ped('app.open', { path: caminho });
+          var novo = ativo(), ids = ((cmd('layer.list', {}) || {}).layers || []).map(function (l) { return l.id; });
+          try { cmd('layer.copyToDocument', { document: alvo, layers: ids, source: novo, center: true }); }
+          finally { try { cmd('file.close', { document: novo }); } catch (e) { /* já fechou */ } cmd('document.activate', { document: alvo }); }
+          return true;
+        },
+        exportar: function (doc, caminho, qualidade) {
+          if (doc !== null && doc !== undefined) { cmd('document.activate', { document: doc }); }
+          var p = { path: caminho };
+          if (qualidade && /\.jpe?g$/i.test(caminho)) { p.quality = Math.max(0, Math.min(12, Math.round(qualidade * 12 / 100))); }
+          return ped('app.save', p);
+        }
+      };
+    }
+    var api = function () {
+      var m = null; try { m = window.parent && window.parent.photocraftArcano; } catch (e) { m = null; }
+      if (!m) { throw new Error('O editor de imagem ainda está abrindo.'); }
+      return m;
+    };
+    var resp = function (t) { var r = JSON.parse(t); if (!r.ok) { throw new Error(r.error || 'erro no editor'); } return r.result; };
+    var bytes = function (c) { var b = fs.readFileSync(c); return new Uint8Array(b.buffer, b.byteOffset, b.length); };
+    return {
+      pedido: function (metodo, params) { return resp(api().arcanoPedido(metodo, JSON.stringify(params || {}))); },
+      colocar: function (caminho) { return resp(api().arcanoColocar(caminho.split(/[\\/]/).pop(), bytes(caminho))); },
+      abrir: function (caminho) { return resp(api().arcanoAbrir(caminho.split(/[\\/]/).pop(), bytes(caminho))); },
+      exportar: function (doc, caminho, qualidade) {
+        var m = api(), b = m.arcanoExportar(doc === null || doc === undefined ? undefined : doc, caminho.split(/[\\/]/).pop(), qualidade || undefined);
+        if (!b) { throw new Error(m.arcanoErro() || 'não consegui gravar o arquivo'); }
+        fs.writeFileSync(caminho, Buffer.from(b));
+        return true;
+      }
+    };
+  }
+  function motorPS() {
+    if (ps) { return ps; }
+    var sep = INFO.platform === 'win32' ? '\\' : '/';
+    ps = window.ArcanoPS({
+      ed: transportePS(), fs: fs, criarDOM: window.ArcanoPSDOM, windows: INFO.platform === 'win32', casa: INFO.home,
+      docs: INFO.home + sep + 'Documents', temp: INFO.tmp, dados: INFO.env && (INFO.env.APPDATA || INFO.home),
+      lerScript: function (c) { return /arcano(-ps)?\.jsx$/i.test(c) ? lerDoSite(EXT_DIR + '/jsx/' + c.split(/[\\/]/).pop(), 'utf8') : fs.readFileSync(c, 'utf8'); }
+    });
+    return ps;
+  }
   function noEditor(codigo, cb) {
     if (MODO_PC) {
       op('/plugin/editorpc', { app: MODO_PC, codigo: codigo }).then(function (r) { cb(r || { ok: false, erro: 'sem resposta' }); }, function (e) { cb({ ok: false, erro: e.message }); });
@@ -633,6 +691,12 @@
   var RE_EVALFILE = /\$\.evalFile\(new File\(("(?:[^"\\]|\\.)*")\)\);?/;
   function evalScript(codigo, cb) {
     cb = cb || function () {};
+    if (MODO_PS) {
+      var r;
+      try { r = motorPS().avaliar(codigo); } catch (e) { r = 'EvalScript error.'; try { console.warn('[Arcano Design]', e); } catch (x) {} }
+      depois(function () { cb(r); });
+      return;
+    }
     var m = RE_EVALFILE.exec(codigo), passos = [];
     if (m) {
       var arq = JSON.parse(m[1]);
@@ -662,7 +726,7 @@
         if (!aberto && !aviso) {
           aviso = document.createElement('div');
           aviso.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99998;padding:12px 14px;border-radius:12px;background:#2a1747;border:1px solid #7c3aed;color:#fff;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4)';
-          aviso.textContent = 'Abra o Arcano Layers Vídeo no seu computador: o painel do Arcano Motion conversa com ele.';
+          aviso.textContent = MODO_PS ? 'Abra o Arcano Layers Imagem no seu computador: o painel do Arcano Design conversa com ele.' : 'Abra o Arcano Layers Vídeo no seu computador: o painel do Arcano Motion conversa com ele.';
           document.body.appendChild(aviso);
         } else if (aberto && aviso) { aviso.parentNode.removeChild(aviso); aviso = null; }
       }, function () {}).then(function () { setTimeout(ver, 3000); });
@@ -671,9 +735,9 @@
   }
   var cepFalso = {
     evalScript: evalScript,
-    getHostEnvironment: function () { return JSON.stringify({ appName: 'AEFT', appVersion: '26.0', appLocale: 'pt_BR', appUILocale: 'pt_BR', appId: 'AEFT', isAppOnline: true, appSkinInfo: { panelBackgroundColor: { color: { red: 35, green: 35, blue: 35 } } } }); },
+    getHostEnvironment: function () { return JSON.stringify({ appName: MODO_PS ? 'PHXS' : 'AEFT', appVersion: MODO_PS ? '27.0' : '26.0', appLocale: 'pt_BR', appUILocale: 'pt_BR', appId: 'AEFT', isAppOnline: true, appSkinInfo: { panelBackgroundColor: { color: { red: 35, green: 35, blue: 35 } } } }); },
     getCurrentApiVersion: function () { return JSON.stringify({ major: 12, minor: 0, micro: 0 }); },
-    getExtensionId: function () { return 'com.arcano.motion.panel'; },
+    getExtensionId: function () { return MODO_PS ? 'com.arcano.design.panel' : 'com.arcano.motion.panel'; },
     getSystemPath: function () { return EXT_DIR; },
     dispatchEvent: function () {}, addEventListener: function () {}, removeEventListener: function () {},
     requestOpenExtension: function () {}, closeExtension: function () {}, invokeSync: function () { return ''; }, invokeAsync: function () {}
@@ -742,8 +806,10 @@
       window.cep = cepUtil;
       window.ARCANO_NAVEGADOR = true;
       window.ARCANO_PC = !!MODO_PC;
-      carregarScripts(window.ARCANO_SCRIPTS || [], 0);
-      if (MODO_PC) { document.title = 'Arcano Motion'; vigiarProgramaPC(); }
+      if (MODO_PS) { window.__arcanoHost = 'ps'; }
+      // Photoshop: a camada que imita o Photoshop (ps-dom.js) entra antes do plugin
+      carregarScripts((MODO_PS ? ['web/ps-dom.js', 'web/ps-dom-camadas.js'] : []).concat(window.ARCANO_SCRIPTS || []), 0);
+      if (MODO_PC) { document.title = MODO_PS ? 'Arcano Design' : 'Arcano Motion'; vigiarProgramaPC(); }
     });
   }
   // atualizador (igual ao After): o sw.js serve a versão que o painel instalou pelo botão "Baixar e instalar"
