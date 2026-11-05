@@ -79,9 +79,43 @@
     if ((n || 0) > 600) { f(new Error('o editor não abriu')); return; }
     setTimeout(function () { quandoEditorPronto(f, (n || 0) + 1); }, 200);
   }
+  // Fontes do PC para o PSD: o editor pede as que o navegador não tem, o painel busca pelo Arcano
+  // Conector e devolve os arquivos (o editor importa o PSD depois; sem resposta em 25 s importa assim mesmo).
+  setInterval(function () {
+    var m = window.effectcraft && window.effectcraft.arcano;
+    if (!m || typeof m.arcanoFontesPedido !== 'function') { return; }
+    var p = ''; try { p = m.arcanoFontesPedido(); } catch (e) { return; }
+    if (p) {
+      p = JSON.parse(p);
+      try { painel.contentWindow.postMessage({ arcano: 'fontes', id: p.id, nomes: p.nomes }, location.origin); } catch (e) { m.arcanoFontesResposta(p.id, []); }
+    }
+    // Projeto do After (.aep/.aet) jogado no editor: o painel do Arcano Motion lê e monta tudo numa pasta.
+    if (typeof m.arcanoAepPedidos === 'function') {
+      var lista = []; try { lista = JSON.parse(m.arcanoAepPedidos()) || []; } catch (e) { lista = []; }
+      lista.forEach(function (caminho) {
+        var b = null; try { b = window.effectcraft.readFile(caminho); } catch (e) { b = null; }
+        var nome = String(caminho).split(/[\\/]/).pop();
+        if (b && !(b instanceof Uint8Array)) { b = new Uint8Array(b); }
+        if (b) { b = b.slice(); }
+        try { painel.contentWindow.postMessage({ arcano: 'aep', nome: nome, bytes: b }, location.origin, b ? [b.buffer] : []); } catch (e) { /* sem painel */ }
+      });
+    }
+  }, 300);
   window.addEventListener('message', function (ev) {
     if (ev.source !== painel.contentWindow) { return; }
     var d = ev.data || {};
+    if (d.arcano === 'fontes-resposta') {
+      var m = window.effectcraft && window.effectcraft.arcano;
+      if (m) { try { m.arcanoFontesResposta(d.id, (d.fontes || []).map(function (f) { return f.dados; }).filter(function (b) { return b instanceof Uint8Array; })); } catch (e) { /* o editor importa sozinho depois */ } }
+      return;
+    }
+    // fontes do PC para um projeto do After que o painel vai montar (só instala no editor)
+    if (d.arcano === 'fontes-adicionar') {
+      var m2 = window.effectcraft && window.effectcraft.arcano, n = 0;
+      if (m2 && typeof m2.arcanoFontesAdicionar === 'function') { try { n = m2.arcanoFontesAdicionar((d.fontes || []).filter(function (b) { return b instanceof Uint8Array; })); } catch (e) { n = 0; } }
+      painel.contentWindow.postMessage({ arcano: 'fontes-adicionadas', id: d.id, n: n }, location.origin);
+      return;
+    }
     if (d.arcano !== 'eval') { return; }
     var responder = function (o) { o.arcano = 'eval-resposta'; o.id = d.id; painel.contentWindow.postMessage(o, '*'); };
     // arquivos do PC usados pelo script (mesmo caminho) e o que o script gravar em caminho do PC (volta ao plugin)

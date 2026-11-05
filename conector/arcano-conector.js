@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const VERSAO = '0.4.0';
+const VERSAO = '0.4.1';
 const PORTAS = [47821, 47822, 47823, 47824, 47825];
 const ORIGENS = [
   'https://layers.voxvisual.com.br',
@@ -614,6 +614,110 @@ function opHttpCorpo(c) {
   });
 }
 
+// ─── Fontes instaladas no PC (os editores do navegador não enxergam as fontes do sistema) ───
+// O editor pede pelo nome do PSD (PostScript, ex. "Gobold-Bold") ou pela família; o conector acha o
+// arquivo nas pastas de fontes do sistema/usuário e devolve os bytes. Só arquivos de fonte, só dessas pastas.
+let indiceFontes = null, indiceFontesEm = 0;
+function chaveFonte(s) { return String(s || '').toLowerCase().replace(/[\s\-_.,']/g, ''); }
+function pastasFontes() {
+  const h = os.homedir(), l = [];
+  if (WIN) {
+    l.push(path.join(process.env.WINDIR || process.env.SystemRoot || 'C:\\Windows', 'Fonts'));
+    if (process.env.LOCALAPPDATA) l.push(path.join(process.env.LOCALAPPDATA, 'Microsoft', 'Windows', 'Fonts'));
+  } else if (process.platform === 'darwin') {
+    l.push('/System/Library/Fonts', '/Library/Fonts', path.join(h, 'Library', 'Fonts'));
+  } else {
+    l.push('/usr/share/fonts', '/usr/local/share/fonts', path.join(h, '.fonts'), path.join(h, '.local', 'share', 'fonts'));
+  }
+  return l;
+}
+// Nomes de uma fonte (TTF/OTF/TTC): tabela 'name' de cada face, lida por pedaços (sem abrir o arquivo inteiro).
+function nomesDaFonte(arq) {
+  const fd = fs.openSync(arq, 'r');
+  try {
+    const ler = (pos, n) => { const b = Buffer.alloc(n); const lidos = fs.readSync(fd, b, 0, n, pos); return lidos === n ? b : null; };
+    const cab = ler(0, 12); if (!cab) return [];
+    let faces = [0];
+    if (cab.toString('latin1', 0, 4) === 'ttcf') {
+      const n = Math.min(cab.readUInt32BE(8), 64); const o = ler(12, n * 4); if (!o) return [];
+      faces = []; for (let i = 0; i < n; i++) faces.push(o.readUInt32BE(i * 4));
+    }
+    const nomes = [];
+    for (const base of faces) {
+      const h = ler(base, 12); if (!h) continue;
+      const nt = Math.min(h.readUInt16BE(4), 200); const tabs = ler(base + 12, nt * 16); if (!tabs) continue;
+      let pos = -1, tam = 0;
+      for (let i = 0; i < nt; i++) if (tabs.toString('latin1', i * 16, i * 16 + 4) === 'name') { pos = tabs.readUInt32BE(i * 16 + 8); tam = tabs.readUInt32BE(i * 16 + 12); }
+      if (pos < 0 || tam < 6 || tam > 4 * 1048576) continue;
+      const t = ler(pos, tam); if (!t) continue;
+      const qtd = t.readUInt16BE(2), ini = t.readUInt16BE(4), achados = {};
+      for (let i = 0; i < qtd && 6 + i * 12 + 12 <= t.length; i++) {
+        const r = 6 + i * 12, plat = t.readUInt16BE(r), id = t.readUInt16BE(r + 6), len = t.readUInt16BE(r + 8), off = t.readUInt16BE(r + 10);
+        if (![1, 2, 4, 6, 16, 17].includes(id) || ini + off + len > t.length) continue;
+        const raw = t.subarray(ini + off, ini + off + len);
+        let s;
+        if (plat === 0 || plat === 3) { const c = Buffer.from(raw); if (c.length % 2) continue; c.swap16(); s = c.toString('utf16le'); } else if (plat === 1) { s = raw.toString('latin1'); } else continue;
+        if (s && (!achados[id] || plat === 3)) achados[id] = s;
+      }
+      nomes.push(achados);
+    }
+    return nomes;
+  } finally { fs.closeSync(fd); }
+}
+function montarIndiceFontes() {
+  const idx = new Map(), fracos = new Map();
+  let vistos = 0;
+  const andar = (dir, nivel) => {
+    let itens; try { itens = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const d of itens) {
+      if (vistos > 30000) return;
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) { if (nivel < 4) andar(p, nivel + 1); continue; }
+      if (!/\.(ttf|otf|ttc|otc)$/i.test(d.name)) continue;
+      vistos++;
+      let lista; try { lista = nomesDaFonte(p); } catch (e) { continue; }
+      for (const n of lista) {
+        const fam = n[16] || n[1] || '', est = n[17] || n[2] || '';
+        for (const k of [n[6], n[4], fam + ' ' + est, (n[1] || '') + ' ' + (n[2] || '')]) { const c = chaveFonte(k); if (c && !idx.has(c)) idx.set(c, p); }
+        // Família sozinha: só se nada mais casar (prefere o estilo Regular).
+        for (const f of [n[16], n[1]]) { const c = chaveFonte(f); if (c && (!fracos.has(c) || /^(regular|normal|book|roman)$/i.test(est))) fracos.set(c, p); }
+      }
+    }
+  };
+  for (const d of pastasFontes()) andar(d, 0);
+  for (const [k, p] of fracos) if (!idx.has(k)) idx.set(k, p);
+  return idx;
+}
+function opFontes(c) {
+  const nomes = (Array.isArray(c.nomes) ? c.nomes : []).map(String).filter(Boolean).slice(0, 64);
+  const achar = () => {
+    const r = new Map();
+    for (const n of nomes) {
+      const k = chaveFonte(n);
+      // "Fonte-Estilo" (PostScript) sem arquivo com esse nome: tenta a família ("Fonte").
+      const p = indiceFontes.get(k) || indiceFontes.get(chaveFonte(n.replace(/-[^-]*$/, '')));
+      if (p) r.set(n, p);
+    }
+    return r;
+  };
+  if (!indiceFontes) { indiceFontes = montarIndiceFontes(); indiceFontesEm = Date.now(); }
+  let achadas = achar();
+  // Fonte que acabou de ser instalada: refaz o índice (no máximo a cada 30 s).
+  if (achadas.size < nomes.length && Date.now() - indiceFontesEm > 30000) { indiceFontes = montarIndiceFontes(); indiceFontesEm = Date.now(); achadas = achar(); }
+  const fontes = [], porArquivo = new Map();
+  let total = 0;
+  for (const [nome, p] of achadas) {
+    if (porArquivo.has(p)) { porArquivo.get(p).nomes.push(nome); continue; }
+    let st; try { st = fs.statSync(p); } catch (e) { continue; }
+    if (st.size > 40 * 1048576 || total + st.size > 120 * 1048576) continue;
+    let dados; try { dados = fs.readFileSync(p); } catch (e) { continue; }
+    total += st.size;
+    const f = { nomes: [nome], arquivo: path.basename(p), dados };
+    porArquivo.set(p, f); fontes.push(f);
+  }
+  return { fontes, faltando: nomes.filter((n) => !achadas.has(n)) };
+}
+
 function infoPlugin() {
   const P = pastasArcano();
   const env = {};
@@ -1005,6 +1109,7 @@ async function tratarPlugin2(url, json, c) {
     case '/plugin/extrair': await tentar(() => opExtrair(c)); return true;
     case '/plugin/zipar': await tentar(() => opZipar(c)); return true;
     case '/plugin/achar': await tentar(() => opAcharPrograma(c)); return true;
+case '/plugin/fontes': await tentar(() => opFontes(c)); return true;
     case '/plugin/janela': await tentar(() => opJanela(c)); return true;
     case '/plugin/editorpc': await tentar(() => opEditorPC(c)); return true;
     case '/plugin/editorpc/pedido': await tentar(() => pedidoEditorPC(String(c.app || 'imagem'), c.metodo, c.params)); return true;

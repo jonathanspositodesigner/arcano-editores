@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSAO = '1.2.32';
+  var VERSAO = '1.2.33';
   var VERSOES_MCP = ['2025-06-18', '2025-03-26', '2024-11-05'];
   var cep = window.__adobe_cep__;
 
@@ -7079,6 +7079,8 @@
     if (!ehPS()) { ligarRemoto(); }
     iniciarConta(rotaInicial);
     vigiarLoginComum();
+    ligarBarraEditor();
+    ligarProjetoAfter();
     esconderSplash();
     // nova versão do plugin: confere só ao abrir o painel
     setTimeout(verificarAtualizacaoPlugin, 2600);
@@ -11453,6 +11455,230 @@
     el.querySelector('.rh-status-fechar').hidden = estado !== 'ok' && estado !== 'erro';
     el.querySelector('.rh-status-msg').textContent = texto;
   }
+  // =====================================================================
+  // BARRA RÁPIDA DO EDITOR DE IMAGEM (Arcano Layers no navegador e no programa de PC)
+  // O editor desenha a conta na barra do topo (créditos, Preços, perfil) e a barra da camada (a do Arcano
+  // Layers antigo: pedido + referência, Upscale, Remover fundo, Cor) — arcano.rs do editor. Quem faz a IA é
+  // ESTE painel, com o que ele já tem (conta, créditos, envio, fila, montagem na camada).
+  // Recados para o editor: window.ipc (PC, WebView) ou postMessage para a página do editor (navegador).
+  // Pedidos do editor: window.arcanoBarra(p) (PC) ou postMessage { arcanoBarraPedido } (navegador).
+  // =====================================================================
+  var CUSTO_ALTERACAO_BARRA = 50;   // o mesmo do Arcano Layers (flyer-politico/editar confere no servidor)
+  var barraLigada = false, barraUltimaConta = '';
+  function avisarEditor(msg) {
+    try {
+      if (window.ipc && typeof window.ipc.postMessage === 'function') { window.ipc.postMessage(JSON.stringify(msg)); return; }
+      if (window.parent && window.parent !== window) { window.parent.postMessage({ arcanoBarra: msg }, location.origin); }
+    } catch (e) { /* sem editor */ }
+  }
+  function barraConta() {
+    var c = cfg.conta || {}, logado = !!(contaLigada() && c.refresh);
+    var m = { tipo: 'conta', logado: logado, email: c.email || '', nome: c.nome || '', creditos: typeof c.creditos === 'number' ? c.creditos : null, premium: logado && !!c.premium };
+    var s = JSON.stringify(m);
+    if (s !== barraUltimaConta) { barraUltimaConta = s; avisarEditor(m); }
+  }
+  function barraCustos() {
+    var m = { tipo: 'custos', alterar: CUSTO_ALTERACAO_BARRA };
+    try {
+      custoUpscale(cfg.upsTipo || 'pessoas_perto', function (n) {
+        m.upscale = Number(n) || 0;
+        FERR_RH.fundo.custo({}, function (k) { m.fundo = Number(k) || 0; avisarEditor(m); });
+      });
+    } catch (e) { avisarEditor(m); }
+  }
+  // ─── Projeto do After (.aep/.aet) jogado no editor de vídeo (navegador e programa de PC) ───
+  // O editor não lê o formato do After: guarda o pedido e este painel lê o projeto com o py-aep (Python
+  // no navegador, num Web Worker: web/aep/trabalhador.js + web/aep/aep_jsx.py), que escreve o script
+  // que monta tudo numa pasta (pastas, arquivos, composições, camadas, keyframes, efeitos, textos).
+  // O leitor (Pyodide, ~13 MB) é baixado na 1ª vez e o navegador guarda.
+  var PYODIDE_BASE = 'https://cdn.jsdelivr.net/npm/pyodide@0.29.5/';
+  var trabAep = null, seqAep = 0, pedidosAep = {}, filaAep = [], aepRodando = false;
+  function leitorAep() {
+    if (trabAep) { return trabAep; }
+    trabAep = new Worker(new URL('web/aep/trabalhador.js?v=' + VERSAO, location.href).href);
+    trabAep.onmessage = function (e) {
+      var d = e.data || {}, p = pedidosAep[d.id];
+      if (!p) { return; }
+      if (d.progresso) { p.progresso(d.progresso); return; }
+      delete pedidosAep[d.id];
+      p.fim(d);
+    };
+    trabAep.onerror = function (e) {
+      var msg = 'o leitor do projeto parou' + (e && e.message ? ': ' + e.message : '');
+      Object.keys(pedidosAep).forEach(function (k) { var p = pedidosAep[k]; delete pedidosAep[k]; p.fim({ ok: false, erro: msg }); });
+      trabAep = null;
+    };
+    return trabAep;
+  }
+  function abrirProjetoAfter(bytes, nome) {
+    filaAep.push({ bytes: bytes, nome: String(nome || 'Projeto do After') });
+    proximoProjetoAfter();
+  }
+  function proximoProjetoAfter() {
+    if (aepRodando || !filaAep.length) { return; }
+    var item = filaAep.shift(), nome = item.nome;
+    var fim = function (texto, erro) { aepRodando = false; mostrarToast(texto, erro); try { console.log('[Arcano] projeto do After:', texto); } catch (e) {} proximoProjetoAfter(); };
+    if (!(item.bytes && item.bytes.length)) { fim('Não consegui ler o arquivo ' + nome + '.', true); return; }
+    aepRodando = true;
+    var id = ++seqAep, inicio = Date.now();
+    pedidosAep[id] = {
+      progresso: function (t) { mostrarToast(t + ' (' + nome + ')'); },
+      fim: function (r) {
+        if (!r.ok) { fim('Não consegui abrir o projeto do After ' + nome + ': ' + r.erro, true); return; }
+        var rodar = function () {
+          mostrarToast('Montando o projeto ' + nome + ' no editor...');
+          evalJSX(r.jsx, 15 * 60 * 1000, function (res) {
+            if (res === 'ERRO_TEMPO') { fim('O editor demorou demais para montar o projeto ' + nome + '.', true); return; }
+            var o = null; try { o = JSON.parse(res); } catch (e) { o = null; }
+            if (!o) { fim('O editor não conseguiu montar o projeto ' + nome + ': ' + String(res).slice(0, 300), true); return; }
+            var avisos = (r.avisos || []).concat(o.avisos || []);
+            var faltando = (o.faltando || []).filter(function (c, i, l) { return l.indexOf(c) === i; });
+            try { if (avisos.length) { console.warn('[Arcano] projeto do After, o que não veio igual:', avisos); } if (faltando.length) { console.warn('[Arcano] arquivos que faltaram:', faltando); } } catch (e) {}
+            var t = 'Projeto do After aberto na pasta "' + o.pasta + '": ' + o.comps + ' composiç' + (o.comps === 1 ? 'ão' : 'ões') + '.';
+            if (faltando.length) { t += ' ' + faltando.length + ' arquivo' + (faltando.length === 1 ? '' : 's') + ' não ' + (faltando.length === 1 ? 'foi encontrado' : 'foram encontrados') + ' (entra' + (faltando.length === 1 ? '' : 'm') + ' como espaço reservado).'; }
+            if (avisos.length) { t += ' ' + avisos.length + ' item(ns) sem equivalente no editor (efeito de terceiros, estilo de camada...).'; }
+            fim(t + ' ' + Math.round((Date.now() - inicio) / 1000) + ' s.', faltando.length > 0 || avisos.length > 0);
+          });
+        };
+        // navegador: as fontes do projeto vêm do PC pelo Arcano Conector antes de montar
+        if (window.ARCANO_NAVEGADOR && !/[?&]pc=/.test(location.search) && (r.fontes || []).length && typeof window.arcanoFontesDoPC === 'function') {
+          mostrarToast('Buscando no seu computador as fontes do projeto...');
+          window.arcanoFontesDoPC(r.fontes).then(function (fontes) {
+            if (!fontes.length) { rodar(); return; }
+            var idF = 'f' + id, pronto = false;
+            var ok = function () { if (pronto) { return; } pronto = true; window.removeEventListener('message', ouvir); rodar(); };
+            var ouvir = function (e) { if (e.source === window.parent && e.data && e.data.arcano === 'fontes-adicionadas' && e.data.id === idF) { ok(); } };
+            window.addEventListener('message', ouvir);
+            window.parent.postMessage({ arcano: 'fontes-adicionar', id: idF, fontes: fontes.map(function (f) { return f.dados; }) }, location.origin);
+            setTimeout(ok, 5000);
+          });
+          return;
+        }
+        rodar();
+      },
+    };
+    leitorAep().postMessage({
+      id: id, bytes: item.bytes, nome: nome, pyodide: PYODIDE_BASE,
+      rodas: new URL('../painel/aep/', location.href).href,
+      conversor: new URL('web/aep/aep_jsx.py?v=' + VERSAO, location.href).href,
+    }, [item.bytes.buffer]);
+  }
+  // Entrada: navegador (o editor manda os bytes pelo montar.js) e programa de PC (o programa copia o
+  // arquivo para a pasta temporária "arcano-aep" e avisa pelo WebView).
+  var aepLigado = false;
+  function ligarProjetoAfter() {
+    if (aepLigado || !window.ARCANO_NAVEGADOR || ehPS()) { return; }
+    aepLigado = true;
+    window.addEventListener('message', function (e) {
+      if (e.source !== window.parent || e.origin !== location.origin || !e.data || e.data.arcano !== 'aep') { return; }
+      abrirProjetoAfter(e.data.bytes, e.data.nome);
+    });
+    var anterior = window.arcanoBarra;
+    window.arcanoBarra = function (p) {
+      if (p && p.tipo === 'aep') {
+        var b = null;
+        try { b = fs.readFileSync(String(p.caminho)); } catch (x) { mostrarToast('Não consegui ler o projeto do After: ' + x.message, true); return; }
+        try { fs.unlinkSync(String(p.caminho)); } catch (x) { /* fica na pasta temporária */ }
+        abrirProjetoAfter(new Uint8Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)), p.nome);
+        return;
+      }
+      if (anterior) { anterior(p); }
+    };
+  }
+
+  function ligarBarraEditor() {
+    if (barraLigada || !(window.ARCANO_NAVEGADOR && ehPS())) { return; }
+    barraLigada = true;
+    window.arcanoBarra = function (p) { try { tratarPedidoBarra(p); } catch (e) { console.warn('[Arcano] barra', e); } };
+    window.addEventListener('message', function (e) {
+      if (e.source !== window.parent || e.origin !== location.origin || !e.data || !e.data.arcanoBarraPedido) { return; }
+      try { tratarPedidoBarra(e.data.arcanoBarraPedido); } catch (x) { console.warn('[Arcano] barra', x); }
+    });
+    barraConta();
+    setInterval(barraConta, 2000);
+    setTimeout(barraCustos, 3000);
+  }
+  function tratarPedidoBarra(p) {
+    if (!p || !p.acao) { return; }
+    if (p.acao === 'sair') { try { sairDestePC(); } catch (e) {} setTimeout(barraConta, 400); return; }
+    var camada = Number(p.layer), docId = Number(p.doc) || 1, nome = String(p.nome || 'Camada').slice(0, 80);
+    var ocupada = function (t) { avisarEditor({ tipo: 'ocupada', layer: camada, texto: t }); };
+    var livre = function (erro, texto) { avisarEditor({ tipo: 'livre', layer: camada, erro: erro ? String(erro).replace(/^Error:\s*/, '') : '', texto: texto || '' }); setTimeout(barraConta, 1500); };
+    if (!(contaLigada() && cfg.conta && cfg.conta.refresh)) { livre('Entre na sua conta do ArcanoApp no painel do Arcano Design.'); return; }
+    if (p.acao === 'upscale' || p.acao === 'fundo') {
+      var def = FERR_RH[p.acao];
+      var op = { docId: docId, id: camada, nome: nome, tipo: cfg.upsTipo || 'pessoas_perto', tam: cfg.upsTam || '2k', custo: 0, ref: {} };
+      ocupada('Conferindo...');
+      // o preço de AGORA, do servidor (o da barra é só para mostrar)
+      def.custo(op, function (custo) {
+        op.custo = Number(custo) || 0;
+        var tem = cfg.conta && typeof cfg.conta.creditos === 'number' ? cfg.conta.creditos : null;
+        if (tem !== null && tem < op.custo) { livre('O ' + def.nome + ' custa ' + op.custo + ' créditos e você tem ' + tem + '. Recarregue para continuar.'); return; }
+        ocupada(p.acao === 'upscale' ? 'Fazendo o upscale...' : 'Removendo o fundo...');
+        rodarFerramentaRH(p.acao, op, function (erro) { livre(erro, erro ? '' : def.nome + ' pronto: o resultado entrou acima da camada (a original ficou desligada).'); });
+      });
+      return;
+    }
+    if (p.acao === 'alterar') { alterarCamadaBarra(p, docId, camada, nome, ocupada, livre); }
+  }
+  // "O que mudar nesta camada?": o mesmo caminho do Arcano Layers (flyer-politico /editar + /poll, GPT Image pela
+  // kie), com a referência do "+" como segunda imagem. O resultado entra acima da camada e a original fica desligada.
+  function alterarCamadaBarra(p, docId, camada, nome, ocupada, livre) {
+    var path = R('path'), pasta = path.join(R('os').tmpdir(), 'arcano-design');
+    try { garantirPasta(pasta); } catch (e) { livre('Não consegui criar a pasta temporária: ' + e.message); return; }
+    var base = 'alt_' + carimbo() + '_' + Math.floor(Math.random() * 1e6), png = path.join(pasta, base + '.png');
+    var tem = cfg.conta && typeof cfg.conta.creditos === 'number' ? cfg.conta.creditos : null;
+    if (tem !== null && tem < CUSTO_ALTERACAO_BARRA) { livre('A alteração custa ' + CUSTO_ALTERACAO_BARRA + ' créditos e você tem ' + tem + '. Recarregue para continuar.'); return; }
+    var colocar = function (url) {
+      ocupada('Colocando na camada...');
+      var destino = path.join(pasta, base + '_res.png');
+      baixarArquivoSep(url, destino, function (e) {
+        if (e) { livre('Não consegui baixar o resultado (' + e + '). Ele está em Minhas Criações no ArcanoApp.'); return; }
+        garantirFormatoSep(destino, function (e2, arq) {
+          if (e2) { livre(e2); return; }
+          jsxCall('colocarResultadoIA', [docId, camada, arq, nome + ' (IA)'], 120000, function (r) {
+            if (!r.ok) { livre(String(r.erro || 'Não consegui colocar o resultado na camada.')); return; }
+            livre(null, 'Alteração pronta: entrou acima da camada (a original ficou desligada).');
+          });
+        });
+      });
+    };
+    ocupada('Preparando a camada...');
+    jsxCall('exportarParaSeparar', [docId, camada, png], 180000, function (r) {
+      if (!r.ok) { livre(String(r.erro || 'Não consegui exportar a camada.')); return; }
+      ocupada('Enviando...');
+      subirImagemIA(png, base + '.png', function (e1, url) {
+        if (e1) { livre(e1); return; }
+        var comRef = function (cb) {
+          if (!p.ref || !p.ref.base64) { cb(null, null); return; }
+          var buf;
+          try { buf = R('buffer').Buffer.from(String(p.ref.base64), 'base64'); } catch (eB) { cb('A referência veio inválida.'); return; }
+          var ext = ((/\.(png|jpe?g|webp)$/i.exec(String(p.ref.nome || '')) || [null, 'png'])[1]).toLowerCase();
+          subirImagemIA(buf, base + '_ref.' + ext, cb);
+        };
+        comRef(function (e2, refUrl) {
+          if (e2) { livre(e2); return; }
+          ocupada('Gerando a alteração...');
+          chamarLayers('editar', { imageUrl: url, pedido: String(p.pedido || '').slice(0, 2000), creditCost: CUSTO_ALTERACAO_BARRA, transparente: true, referenciaUrl: refUrl || null, editor: 'Arcano Layers' }, function (e3, j) {
+            if (e3 || !j || !j.jobId) { livre(e3 || 'Não consegui fazer essa alteração.'); return; }
+            try { atualizarContaApp(); } catch (eA) {}
+            var inicio = Date.now(), erros = 0;
+            (function vez() {
+              chamarLayers('poll', { jobId: j.jobId }, function (e4, r4) {
+                if (r4 && r4.status === 'completed' && r4.outputUrl) { try { atualizarContaApp(); } catch (eB) {} colocar(r4.outputUrl); return; }
+                if (r4 && r4.status === 'failed') { livre((r4.error ? String(r4.error) : 'A alteração falhou.') + ' Se foi cobrado, os créditos voltam sozinhos.'); return; }
+                if (e4 && !r4 && ++erros > 20) { livre('Perdi a conexão com o ArcanoApp. Quando terminar, a alteração aparece em Minhas Criações.'); return; }
+                if (Date.now() - inicio > 600000) { livre('A alteração está demorando demais. Quando terminar, ela aparece em Minhas Criações.'); return; }
+                ocupada('Gerando a alteração... ' + Math.round((Date.now() - inicio) / 1000) + ' s');
+                setTimeout(vez, 2500);
+              });
+            })();
+          });
+        });
+      });
+    });
+  }
+
   function rodarUpscalePS(op, cb) { return rodarFerramentaRH('upscale', op, cb); }
   // op: { docId, id, nome, custo, tipo, tam (upscale), ref: { url, promptId } | { arquivo } , aspect, creativity, customPrompt (cloner) }
   // cb(erro|null, resultado) no fim

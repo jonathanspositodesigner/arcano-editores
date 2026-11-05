@@ -1,0 +1,5 @@
+Leitor de projeto do After (.aep/.aet) do painel do Arcano Motion (navegador e programa de PC).
+O painel baixa estes arquivos na 1ª vez (o código que usa: plugin web/aep/trabalhador.js e aep_jsx.py).
+- py_aep 0.18.2 (MIT, PyPI)        - attrs 26.1.0 (MIT, PyPI)
+- fonttools 4.68.0 (MIT, PyPI)     - pyyaml-puro.zip: PyYAML 6 (MIT), só a parte em Python
+O Python (Pyodide 0.29.5) vem do jsDelivr (npm).

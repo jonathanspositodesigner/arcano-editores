@@ -424,3 +424,16 @@ fn abrir_conector() {
         }
     }
 }
+
+/// Projeto do After (.aep/.aet) jogado no programa de vídeo: copia para a pasta temporária que o
+/// conector deixa o painel ler ("arcano-aep") e devolve o recado para o painel montar o projeto.
+#[allow(dead_code)]
+pub fn aep_para_painel(caminho: &str) -> Option<String> {
+    let origem = std::path::Path::new(caminho);
+    let nome = origem.file_name()?.to_string_lossy().to_string();
+    let pasta = std::env::temp_dir().join("arcano-aep");
+    std::fs::create_dir_all(&pasta).ok()?;
+    let destino = pasta.join(format!("{}-{nome}", std::process::id()));
+    std::fs::copy(origem, &destino).ok()?;
+    Some(serde_json::json!({"tipo": "aep", "caminho": destino.to_string_lossy(), "nome": nome}).to_string())
+}

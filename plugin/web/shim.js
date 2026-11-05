@@ -587,7 +587,23 @@
     if (ev.source !== window.parent) { return; }
     var d = ev.data || {};
     if (d.arcano === 'eval-resposta' && pedidos[d.id]) { var cb = pedidos[d.id]; delete pedidos[d.id]; cb(d); }
+    // O editor pede as fontes do PC (PSD com fonte que o navegador não tem): o conector acha e manda os arquivos.
+    if (d.arcano === 'fontes') {
+      var responder = function (fontes) {
+        var bufs = fontes.map(function (f) { return f.dados.buffer; });
+        try { window.parent.postMessage({ arcano: 'fontes-resposta', id: d.id, fontes: fontes }, '*', bufs); } catch (e) { window.parent.postMessage({ arcano: 'fontes-resposta', id: d.id, fontes: [] }, '*'); }
+      };
+      op('/plugin/fontes', { nomes: (d.nomes || []).slice(0, 64) }).then(function (r) {
+        responder(((r && r.fontes) || []).map(function (f) { return { nomes: f.nomes, arquivo: f.arquivo, dados: new Uint8Array(f.dados) }; }));
+      }, function () { responder([]); });
+    }
   });
+  // O painel (projeto do After) também pede fontes do PC: promessa de [{ nomes, arquivo, dados: Uint8Array }].
+  window.arcanoFontesDoPC = function (nomes) {
+    return op('/plugin/fontes', { nomes: (nomes || []).slice(0, 64) }).then(function (r) {
+      return ((r && r.fontes) || []).map(function (f) { return { nomes: f.nomes, arquivo: f.arquivo, dados: new Uint8Array(f.dados) }; });
+    }, function () { return []; });
+  };
   // Arquivos do PC citados no script (logo, vídeo, áudio…) vão para a memória do editor com o MESMO
   // caminho; o que o editor gravar num caminho do PC (quadros, renders) volta para o PC pelo conector.
   var RE_CAMINHO = /"((?:[A-Za-z]:\\\\|\/Users\/|\/home\/|\/tmp\/|\/private\/|\/var\/folders\/)(?:[^"\\]|\\.)*)"/g;

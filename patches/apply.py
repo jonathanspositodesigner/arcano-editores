@@ -308,10 +308,13 @@ pub(crate) const GATE: &str =""")
     # camadas). Agora pergunta igual (o mesmo formulário do editor).
     troca(r, "apps/effectcraft-web/src/app.rs",
           '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {',
+          '    if !media.is_empty() && crate::arcano_fontes::segurar(app, &media) {\n        return;\n    }\n'
           '    if !media.is_empty() && effectcraft_ui_egui::panels::dialogs::open_form(app, "file.import", &json!({"paths": media.clone()})) {\n'
           '        return;\n    }\n'
           '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {')
     psd_fiel(r)
+    fontes_pc(r)
+    projeto_after(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
           "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
@@ -428,6 +431,35 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
     # Nome deles em qualquer texto que sobrou (menus, mensagens, tutoriais, traduções).
     nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "crates/effects", "crates/script", "crates/export", "crates/lottie", "apps/effectcraft-web"),
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
+
+
+def projeto_after(r):
+    """Projeto do After (.aep/.aet) jogado no editor de vídeo: o file.import guarda numa fila e o
+    painel do Arcano Motion monta o projeto inteiro numa pasta (arquivos/engine-arcano-aep.rs; quem
+    lê o .aep é o painel, com o py-aep no navegador)."""
+    copia(pathlib.Path(__file__).parent / "arquivos/engine-arcano-aep.rs", pathlib.Path(r) / "crates/engine/src/arcano_aep.rs")
+    troca(r, "crates/engine/src/lib.rs", "pub mod cmd;\n", "pub mod arcano_aep;\npub mod cmd;\n")
+    troca(r, "crates/engine/src/cmd/file.rs",
+          "    let (project_paths, mut paths): (Vec<String>, Vec<String>) = paths.into_iter().partition(|x| super::import_project::is_project_path(x));\n",
+          "    let (project_paths, paths): (Vec<String>, Vec<String>) = paths.into_iter().partition(|x| super::import_project::is_project_path(x));\n"
+          "    // Arcano: projeto do After (.aep/.aet): o painel do Arcano Motion abre (crate::arcano_aep).\n"
+          "    let (aep_paths, mut paths): (Vec<String>, Vec<String>) = paths.into_iter().partition(|x| crate::arcano_aep::eh_aep(x));\n"
+          "    if !aep_paths.is_empty() {\n"
+          "        crate::arcano_aep::pedir(&aep_paths);\n"
+          "        s.toast(\"Abrindo o projeto do After no painel do Arcano Motion…\".to_string());\n"
+          "    }\n")
+
+
+def fontes_pc(r):
+    """Fontes do PC no editor de vídeo do navegador: antes de importar um PSD, pede ao painel (Arcano
+    Conector) as fontes que o navegador não tem (arquivos/effectcraft-web-fontes.rs)."""
+    copia(pathlib.Path(__file__).parent / "arquivos/effectcraft-web-fontes.rs", pathlib.Path(r) / "apps/effectcraft-web/src/arcano_fontes.rs")
+    troca(r, "apps/effectcraft-web/src/lib.rs", "#[cfg(target_arch = \"wasm32\")]\npub mod api;\n",
+          "#[cfg(target_arch = \"wasm32\")]\npub mod api;\n#[cfg(target_arch = \"wasm32\")]\npub mod arcano_fontes;\n")
+    troca(r, "apps/effectcraft-web/Cargo.toml", "effectcraft-ui-egui = { workspace = true }\n",
+          "effectcraft-ui-egui = { workspace = true }\neffectcraft-psd = { workspace = true }\neffectcraft-text = { workspace = true }\n")
+    # o montar.js (painel) lê os pedidos de fonte pelo window.effectcraft.arcano
+    troca(r, "apps/effectcraft-web/web/index.html", "      files: () => ec.files(),\n", "      arcano: ec,\n      files: () => ec.files(),\n")
 
 
 def psd_fiel(r):
@@ -633,6 +665,12 @@ def painel_pc_video(r):
           "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n"
           "        let lugar = effectcraft_ui_egui::arcano_painel::lugar(ui.ctx());\n"
           "        self.painel.quadro(ui.ctx(), frame, lugar);\n"
+          "        for aep in effectcraft_engine::arcano_aep::pendentes() {\n"
+          "            match painel_arcano::aep_para_painel(&aep) {\n"
+          "                Some(recado) => self.painel.mandar(&recado),\n"
+          "                None => self.app.ui.status = format!(\"Não consegui abrir o projeto do After {aep}\"),\n"
+          "            }\n"
+          "        }\n"
           "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n"
           "        self.atualizador.quadro(ui.ctx(), \"Arcano Layers Vídeo\");\n")
     p = pathlib.Path(r) / "apps/effectcraft/Cargo.toml"
