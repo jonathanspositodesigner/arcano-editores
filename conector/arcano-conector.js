@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const VERSAO = '0.3.0';
+const VERSAO = '0.4.0';
 const PORTAS = [47821, 47822, 47823, 47824, 47825];
 const ORIGENS = [
   'https://layers.voxvisual.com.br',
@@ -1063,6 +1063,21 @@ function lerCorpo(req, limite = 25 * 1048576) {
   });
 }
 
+const SITE_PAINEL = 'https://layers.voxvisual.com.br';
+function servirPainel(req, res) {
+  const bruto = String(req.url).slice(3);   // /plugin/... ou /painel/...
+  const caminho = bruto.split('?')[0];
+  if (caminho.includes('..') || caminho.includes('\\') || !/^\/(plugin|painel)\/[A-Za-z0-9._\/-]*$/.test(caminho)) { res.writeHead(404); res.end(); return; }
+  const r = https.get(SITE_PAINEL + bruto, { headers: { 'User-Agent': 'ArcanoConector/' + VERSAO, 'Accept-Encoding': 'identity' }, timeout: 30000 }, (up) => {
+    const h = { 'Content-Type': up.headers['content-type'] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' };
+    if (up.headers['content-length']) h['Content-Length'] = up.headers['content-length'];
+    res.writeHead(up.statusCode === 200 ? 200 : (up.statusCode || 502), h);
+    up.pipe(res);
+  });
+  r.on('timeout', () => r.destroy(new Error('tempo esgotado')));
+  r.on('error', () => { if (!res.headersSent) { res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' }); } res.end('Sem internet para abrir o painel do Arcano.'); });
+}
+
 async function tratar(req, res) {
   const url = String(req.url).split('?')[0];
   const host = String(req.headers.host || '');
@@ -1080,6 +1095,16 @@ async function tratar(req, res) {
     if (!respostas.length) { res.writeHead(202); res.end(); return; }
     res.writeHead(200, cabecalhosJSON());
     res.end(JSON.stringify(Array.isArray(msg) ? respostas : respostas[0]));
+    return;
+  }
+
+  // Painel dentro do programa de PC (Arcano Layers Vídeo/Imagem): a página do plugin servida daqui
+  // (mesma origem da API, sem permissão de rede local nem conteúdo misto). Vem do site do Arcano.
+  if (req.method === 'GET' && /^\/ui\/(plugin|painel)\//.test(url)) { servirPainel(req, res); return; }
+  // a página servida daqui pergunta o /status sem Origin (GET da mesma origem)
+  if (req.method === 'GET' && url === '/status' && !req.headers.origin) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ app: 'arcano-conector', versao: VERSAO, so: process.platform }));
     return;
   }
 

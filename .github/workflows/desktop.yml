@@ -70,7 +70,7 @@ jobs:
         working-directory: src
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo build --release --locked -p "$CRATE"
+        run: cargo build --release -p "$CRATE"  # sem --locked: o patch do painel acrescenta o wry
       - name: Arcano Conector (Node embutido)
         working-directory: site/conector
         run: |
@@ -154,7 +154,7 @@ jobs:
           python site/patches/apply.py "$PATCH" src --desktop
       - name: Compilar (Apple Silicon + Intel)
         working-directory: src
-        run: cargo build --release --locked -p "$CRATE" --target aarch64-apple-darwin --target x86_64-apple-darwin
+        run: cargo build --release -p "$CRATE" --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: App (.app)
         run: |
           V="${REF#v}"

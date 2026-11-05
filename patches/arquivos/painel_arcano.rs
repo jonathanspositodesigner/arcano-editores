@@ -1,0 +1,306 @@
+//! Arcano Layers (programa de PC): o painel do Arcano Motion / Arcano Design DENTRO da janela do
+//! programa, num espaço do próprio editor (o editor diz onde a cada quadro), como os painéis CEP
+//! do After/Photoshop. É uma página web (o MESMO plugin do navegador) num WebView do sistema
+//! (WebView2 no Windows, WKWebView no Mac), servida pelo Arcano Conector em 127.0.0.1.
+//! Também trava o programa até a pessoa entrar com a conta do ArcanoApp (o login do painel fica
+//! no conta.json comum, o mesmo do plugin do After/Photoshop).
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+#[cfg(any(windows, target_os = "macos"))]
+use wry::raw_window_handle as wry_janela;
+#[cfg(not(any(windows, target_os = "macos")))]
+mod wry_janela {
+    pub trait HasWindowHandle {}
+    impl<T> HasWindowHandle for T {}
+}
+
+/// Onde o painel fica: o espaço que o editor reservou neste quadro (pontos do egui).
+pub type Lugar = Option<egui::Rect>;
+
+pub struct Painel {
+    /// `video` ou `imagem` (vai na URL: ?pc=video | ?pc=imagem).
+    app: &'static str,
+    #[cfg(any(windows, target_os = "macos"))]
+    web: Option<wry::WebView>,
+    #[cfg(any(windows, target_os = "macos"))]
+    _contexto: Option<wry::WebContext>,
+    /// Endereço do conector (achado numa thread; `None` enquanto procura).
+    conector: Arc<Mutex<Option<String>>>,
+    procurando: bool,
+    ultimo_lugar: Option<[i32; 4]>,
+    visivel: bool,
+    logado: bool,
+    conferido: Option<Instant>,
+    erro: Option<String>,
+}
+
+impl Painel {
+    pub fn new(app: &'static str) -> Self {
+        Self {
+            app,
+            #[cfg(any(windows, target_os = "macos"))]
+            web: None,
+            #[cfg(any(windows, target_os = "macos"))]
+            _contexto: None,
+            conector: Arc::new(Mutex::new(None)),
+            procurando: false,
+            ultimo_lugar: None,
+            visivel: false,
+            logado: false,
+            conferido: None,
+            erro: None,
+        }
+    }
+
+    /// A pasta comum do Arcano (a mesma do plugin): ArcanoMotion/.
+    fn pasta_comum() -> Option<PathBuf> {
+        let casa = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from);
+        if cfg!(windows) {
+            std::env::var_os("APPDATA").map(PathBuf::from).or_else(|| casa.map(|c| c.join("AppData").join("Roaming"))).map(|p| p.join("ArcanoMotion"))
+        } else if cfg!(target_os = "macos") {
+            casa.map(|c| c.join("Library/Application Support/ArcanoMotion"))
+        } else {
+            casa.map(|c| c.join(".arcanomotion"))
+        }
+    }
+
+    /// Entrou com a conta do ArcanoApp (no painel deste programa ou no plugin do After/Photoshop).
+    pub fn logado(&mut self) -> bool {
+        if self.conferido.is_some_and(|t| t.elapsed() < Duration::from_secs(2)) {
+            return self.logado;
+        }
+        self.conferido = Some(Instant::now());
+        self.logado = Self::pasta_comum()
+            .and_then(|p| std::fs::read_to_string(p.join("conta.json")).ok())
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .is_some_and(|v| v.get("refresh").and_then(|r| r.as_str()).is_some_and(|r| !r.is_empty()) && v.get("uid").is_some_and(|u| !u.is_null()));
+        self.logado
+    }
+
+    /// Procura o Arcano Conector (portas 47821-47825); se não está rodando, abre ele.
+    fn procurar_conector(&mut self) {
+        if self.procurando {
+            return;
+        }
+        self.procurando = true;
+        let alvo = self.conector.clone();
+        std::thread::spawn(move || {
+            let mut abriu = false;
+            loop {
+                for porta in 47821..=47825u16 {
+                    if responde(porta) {
+                        *alvo.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("http://127.0.0.1:{porta}"));
+                        return;
+                    }
+                }
+                if !abriu {
+                    abriu = true;
+                    abrir_conector();
+                }
+                std::thread::sleep(Duration::from_millis(1500));
+            }
+        });
+    }
+
+    /// A cada quadro: põe o painel no espaço reservado (ou o esconde). Sem login e sem espaço
+    /// (painel fechado), aparece na direita mesmo assim, para dar para entrar.
+    pub fn quadro<W: wry_janela::HasWindowHandle>(&mut self, ctx: &egui::Context, frame: &W, lugar: Lugar) {
+        let lugar = match lugar {
+            Some(r) => Some(r),
+            None if !self.logado() => {
+                let t = ctx.content_rect();
+                let w = 420.0_f32.min(t.width() * 0.5);
+                Some(egui::Rect::from_min_max(egui::pos2(t.max.x - w, t.min.y + 28.0), t.max))
+            }
+            None => None,
+        };
+        // menu ou lista aberta: o painel (janela do sistema) ficaria por cima dela
+        let lugar = if self.logado && egui::Popup::is_any_open(ctx) { None } else { lugar };
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            if self.web.is_none() && lugar.is_some() && self.erro.is_none() {
+                let base = self.conector.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+                match base {
+                    None => {
+                        self.procurar_conector();
+                        ctx.request_repaint_after(Duration::from_millis(300));
+                    }
+                    Some(base) => self.criar(&base, frame),
+                }
+            }
+            if let Some(web) = &self.web {
+                match lugar {
+                    Some(r) => {
+                        let ppp = ctx.pixels_per_point();
+                        let q = [(r.min.x * ppp).round() as i32, (r.min.y * ppp).round() as i32, (r.width() * ppp).round().max(1.0) as i32, (r.height() * ppp).round().max(1.0) as i32];
+                        if self.ultimo_lugar != Some(q) {
+                            self.ultimo_lugar = Some(q);
+                            let _ = web.set_bounds(wry::Rect {
+                                position: wry::dpi::PhysicalPosition::new(q[0], q[1]).into(),
+                                size: wry::dpi::PhysicalSize::new(q[2] as u32, q[3] as u32).into(),
+                            });
+                        }
+                        if !self.visivel {
+                            self.visivel = true;
+                            let _ = web.set_visible(true);
+                        }
+                    }
+                    None => {
+                        if self.visivel {
+                            self.visivel = false;
+                            let _ = web.set_visible(false);
+                        }
+                    }
+                }
+            }
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let _ = (ctx, frame, lugar);
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    fn criar<W: wry_janela::HasWindowHandle>(&mut self, base: &str, frame: &W) {
+        let url = format!("{base}/ui/plugin/index-web.html?pc={}", self.app);
+        // Windows: os dados do WebView ficam na pasta do usuário (Arquivos de Programas não é gravável).
+        let dados = Self::pasta_comum().map(|p| p.join(format!("painel-{}", self.app)));
+        let mut contexto = wry::WebContext::new(dados);
+        let r = wry::WebViewBuilder::new_with_web_context(&mut contexto)
+            .with_url(url)
+            .with_visible(false)
+            // link que sai do Arcano (site, cadastro, suporte, pagamento): abre no navegador do PC
+            .with_new_window_req_handler(|u, _| {
+                abrir_no_navegador(&u);
+                wry::NewWindowResponse::Deny
+            })
+            .with_navigation_handler(|u| {
+                let dentro = u.starts_with("http://127.0.0.1") || u.starts_with("http://localhost") || u.starts_with("about:") || u.starts_with("data:") || u.starts_with("blob:");
+                if !dentro {
+                    abrir_no_navegador(&u);
+                }
+                dentro
+            })
+            .with_bounds(wry::Rect { position: wry::dpi::PhysicalPosition::new(0, 0).into(), size: wry::dpi::PhysicalSize::new(10u32, 10u32).into() })
+            .build_as_child(frame);
+        match r {
+            Ok(web) => {
+                self.web = Some(web);
+                self._contexto = Some(contexto);
+                self.ultimo_lugar = None;
+                self.visivel = false;
+            }
+            Err(e) => {
+                log::error!("painel do Arcano: {e}");
+                self.erro = Some(format!("{e}"));
+            }
+        }
+    }
+
+    /// Sem login: cobre o editor com o aviso, com "Criar conta" (abre o ArcanoApp no navegador).
+    /// O painel, por cima, continua clicável para entrar.
+    pub fn trava(&mut self, ctx: &egui::Context, nome_painel: &str) {
+        if self.logado() {
+            return;
+        }
+        ctx.request_repaint_after(Duration::from_secs(2));
+        let tela = ctx.content_rect();
+        egui::Area::new(egui::Id::unique("arcano_trava")).order(egui::Order::Foreground).fixed_pos(tela.min).show(ctx, |ui| {
+            let _ = ui.allocate_rect(tela, egui::Sense::click_and_drag());
+            ui.painter().rect_filled(tela, 0.0, egui::Color32::from_rgba_unmultiplied(12, 10, 18, 240));
+        });
+        // o centro da área livre (sem a coluna do painel, à direita)
+        let livre = egui::Rect::from_min_max(tela.min, egui::pos2((tela.max.x - 420.0).max(tela.min.x + 200.0), tela.max.y));
+        let erro = self.erro.clone();
+        egui::Area::new(egui::Id::unique("arcano_trava_conteudo"))
+            .order(egui::Order::Tooltip)
+            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_pos(livre.center())
+            .show(ctx, |ui| {
+                ui.set_max_width(420.0);
+                ui.vertical_centered(|ui| {
+                    let cor = egui::Color32::from_rgb(235, 228, 250);
+                    match erro {
+                        Some(e) => {
+                            ui.label(egui::RichText::new(format!("Não consegui abrir o painel do {nome_painel}.")).size(20.0).color(cor).strong());
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new(format!("{e}\nNo Windows, instale o Microsoft Edge WebView2 e abra o programa de novo.")).size(14.0).color(cor));
+                        }
+                        None => {
+                            ui.label(egui::RichText::new("Entre com a sua conta do ArcanoApp").size(22.0).color(cor).strong());
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new(format!("Use o mesmo e-mail e senha do site, no painel do {nome_painel} à direita.")).size(14.0).color(egui::Color32::from_gray(190)));
+                            ui.add_space(18.0);
+                            let criar = egui::Button::new(egui::RichText::new("Criar conta no ArcanoApp").size(16.0).color(egui::Color32::WHITE).strong())
+                                .fill(egui::Color32::from_rgb(168, 85, 247))
+                                .corner_radius(10.0)
+                                .min_size(egui::vec2(260.0, 44.0));
+                            if ui.add(criar).clicked() {
+                                abrir_no_navegador(CRIAR_CONTA);
+                            }
+                            ui.add_space(8.0);
+                            ui.label(egui::RichText::new("Abre o site do ArcanoApp. Depois de criar, volte e entre no painel.").size(12.0).color(egui::Color32::from_gray(150)));
+                        }
+                    }
+                });
+            });
+    }
+}
+
+/// Cadastro do ArcanoApp (a página de login abre direto no "criar conta").
+const CRIAR_CONTA: &str = "https://arcanoapp.voxvisual.com.br/login?signup=1";
+
+/// Abre um endereço no navegador padrão (links do painel que saem do Arcano: site, suporte, cadastro).
+pub fn abrir_no_navegador(url: &str) {
+    if !(url.starts_with("https://") || url.starts_with("http://") || url.starts_with("mailto:")) {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler", url]).creation_flags(0x0800_0000).spawn();
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
+fn responde(porta: u16) -> bool {
+    use std::io::{Read, Write};
+    let Ok(mut s) = std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], porta)), Duration::from_millis(400)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_millis(1500)));
+    if s.write_all(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\nOrigin: http://127.0.0.1\r\n\r\n").is_err() {
+        return false;
+    }
+    let mut r = String::new();
+    let _ = s.take(8192).read_to_string(&mut r);
+    r.contains("arcano-conector")
+}
+
+/// O Arcano Conector instalado junto (Windows: %LOCALAPPDATA%\ArcanoConector; Mac: Application Support/Arcano).
+fn abrir_conector() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if let Some(p) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).map(|p| p.join("ArcanoConector").join("ArcanoConector.exe"))
+            && p.is_file()
+        {
+            let _ = std::process::Command::new(p).creation_flags(0x0800_0000).spawn();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let p = PathBuf::from("/Library/Application Support/Arcano/ArcanoConector");
+        if p.is_file() {
+            let _ = std::process::Command::new(p).spawn();
+        }
+    }
+}

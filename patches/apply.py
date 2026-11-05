@@ -408,77 +408,44 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
-def abridor(url, porta):
-    """Rust: a porta do canal do painel e a função que abre o painel numa janela do Chrome/Edge."""
-    return """/// Canal do painel Arcano Motion (o conector conversa com o programa por aqui).
-const ARCANO_PORTA: u16 = {PORTA};
-
-/// Abre o painel do Arcano Motion numa janela própria do Chrome ou do Edge (sem abas), ou no
-/// navegador padrão se nenhum dos dois estiver instalado.
-fn abrir_painel_arcano() {
-    let url = "{PAINEL}";
-    std::thread::spawn(move || {
-        let app = format!("--app={url}");
-        let tentar = |exe: std::path::PathBuf| -> bool {
-            exe.is_file() && std::process::Command::new(&exe).arg(&app).arg("--window-size=460,940").spawn().is_ok()
-        };
-        #[cfg(target_os = "windows")]
-        {
-            for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-                let Some(base) = std::env::var_os(var) else { continue };
-                if tentar(std::path::Path::new(&base).join("Google\\\\Chrome\\\\Application\\\\chrome.exe")) {
-                    return;
-                }
-            }
-            for var in ["ProgramFiles(x86)", "ProgramFiles"] {
-                let Some(base) = std::env::var_os(var) else { continue };
-                if tentar(std::path::Path::new(&base).join("Microsoft\\\\Edge\\\\Application\\\\msedge.exe")) {
-                    return;
-                }
-            }
-            use std::os::windows::process::CommandExt;
-            let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).creation_flags(0x0800_0000).spawn();
-        }
-        #[cfg(target_os = "macos")]
-        {
-            let casa = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
-            for base in [std::path::PathBuf::from("/Applications"), casa.join("Applications")] {
-                if tentar(base.join("Google Chrome.app/Contents/MacOS/Google Chrome")) || tentar(base.join("Microsoft Edge.app/Contents/MacOS/Microsoft Edge")) {
-                    return;
-                }
-            }
-            let _ = std::process::Command::new("open").arg(url).spawn();
-        }
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        {
-            let _ = &tentar;
-            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-        }
-    });
-}
-
-""".replace("{PAINEL}", url).replace("{PORTA}", str(porta))
-
-
-PAINEL_PC_VIDEO = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=video"
-
-
 def painel_pc_video(r):
-    """Programa de PC (vídeo): o painel do Arcano Motion (o MESMO do After) abre numa janela do
-    Chrome/Edge ao lado do programa e manda os scripts pelo Arcano Conector para o canal local do
-    programa (127.0.0.1:47890, só JSON por linha; pedido de página web é recusado na 1ª linha)."""
+    """Programa de PC (vídeo): o painel do Arcano Motion (o MESMO do After) DENTRO do programa, numa
+    aba da doca acima do Preview (como um painel CEP), mostrado por um WebView do sistema
+    (painel_arcano.rs). O painel manda os scripts pelo Arcano Conector para o canal local do
+    programa (127.0.0.1:47890). O programa só libera depois do login do ArcanoApp."""
+    arq = pathlib.Path(__file__).parent / "arquivos"
     m = "apps/effectcraft/src/main.rs"
     troca(r, m, "            if let Some(port) = control_port {\n                disable_app_nap();",
-          "            if control_port.is_none() {\n                abrir_painel_arcano();\n            }\n"
           "            if let Some(port) = control_port.or(Some(ARCANO_PORTA)) {\n                disable_app_nap();")
     troca(r, m, "/// Driven by an agent (`--control`): don't activate the app on launch",
-          abridor(PAINEL_PC_VIDEO, 47890) + "/// Driven by an agent (`--control`): don't activate the app on launch")
-    # Menu Ajuda do programa de PC: reabrir o painel (o link "página do app" vira o painel).
-    troca(r, "crates/engine/src/menus.rs", "  Entrar no grupo do WhatsApp | help.discord\n", "  Painel do Arcano Motion | help.appPage\n  ---\n  Entrar no grupo do WhatsApp | help.discord\n")
-    troca(r, "crates/engine/src/home/links.rs", f'pub const APP_PAGE: &str = "{VOLTAR}";', f'pub const APP_PAGE: &str = "{PAINEL_PC_VIDEO}";')
-
-
-PAINEL_PC_IMAGEM = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=imagem"
+          "/// Canal do painel do Arcano Motion (o conector manda os scripts por aqui).\nconst ARCANO_PORTA: u16 = 47890;\n\n"
+          "/// Driven by an agent (`--control`): don't activate the app on launch")
+    # o painel dentro da janela + a trava de login
+    copia(arq / "painel_arcano.rs", pathlib.Path(r) / "apps/effectcraft/src/painel_arcano.rs")
+    troca(r, m, "mod control_server;", "mod control_server;\nmod painel_arcano;")
+    troca(r, m, "    /// The first frame was drawn (logged once).\n    drawn: bool,\n}",
+          "    /// The first frame was drawn (logged once).\n    drawn: bool,\n    /// O painel do Arcano Motion dentro da janela.\n    painel: painel_arcano::Painel,\n}")
+    troca(r, m, "                launch,\n                drawn: false,\n            }))",
+          "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\"),\n            }))")
+    troca(r, m, "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n",
+          "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n"
+          "        let lugar = effectcraft_ui_egui::arcano_painel::lugar(ui.ctx());\n"
+          "        self.painel.quadro(ui.ctx(), frame, lugar);\n"
+          "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n")
+    p = pathlib.Path(r) / "apps/effectcraft/Cargo.toml"
+    p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
+    # a aba "Arcano Motion" da doca (no lugar do VR Comp Editor), acima do Preview no layout padrão
+    copia(arq / "ui-arcano-painel.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_painel.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod control;\n", "pub mod arcano_painel;\npub mod control;\n")
+    troca(r, "crates/ui-egui/src/panels.rs", "        PanelKind::VrCompEditor => path_vr_panels::vr_editor(app, ui, rect),",
+          "        PanelKind::VrCompEditor => {\n            let _ = &app;\n            crate::arcano_painel::reservar(ui, rect)\n        }")
+    troca(r, "crates/ui-egui/src/dock.rs", '            PanelKind::VrCompEditor => "VR Comp Editor",', '            PanelKind::VrCompEditor => "Arcano Motion",')
+    troca(r, "crates/ui-egui/src/dock.rs",
+          "        _ => hsplit(\n            FixedSecond(300.0),\n            vsplit(\n                Ratio(0.56),\n                hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),\n                tabs(&[Timeline, RenderQueue], 0),\n            ),\n            vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),\n        ),",
+          "        _ => hsplit(\n            FixedSecond(420.0),\n            vsplit(\n                Ratio(0.56),\n                hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),\n                tabs(&[Timeline, RenderQueue], 0),\n            ),\n            vsplit(\n                Ratio(0.62),\n                tabs(&[VrCompEditor], 0),\n                vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),\n            ),\n        ),")
+    # layout novo para quem já abriu o programa (o salvo não tem a aba do Arcano)
+    troca(r, "crates/ui-egui/src/lib.rs", 'pub const WORKSPACES_FILE: &str = "workspaces.json";', 'pub const WORKSPACES_FILE: &str = "workspaces-arcano.json";')
+    troca(r, "crates/ui-egui/src/workspace_state.rs", 'const FILE: &str = "workspaces.json";', 'const FILE: &str = "workspaces-arcano.json";')
 
 
 def painel_pc_imagem(r):
@@ -488,8 +455,7 @@ def painel_pc_imagem(r):
     m = "apps/photocraft/src/main.rs"
     troca(r, m, "    let control = control_setup(control_port, auth, &automation);",
           "    let (auth, automation) = arcano_controle(control_port, auth, automation);\n"
-          "    let control = control_setup(control_port.or(Some(ARCANO_PORTA)), auth, &automation);\n"
-          "    if control_port.is_none() {\n        abrir_painel_arcano();\n    }")
+          "    let control = control_setup(control_port.or(Some(ARCANO_PORTA)), auth, &automation);")
     troca(r, m, """        Err(error) => {
             eprintln!("photocraft: control server failed to bind 127.0.0.1:{port}: {error}");
             std::process::exit(2);
@@ -501,7 +467,9 @@ def painel_pc_imagem(r):
             std::process::exit(2);
         }""")
     troca(r, m, "/// The control server's port, token and workspace, when it is on (exits 2 on a bad configuration).",
-          abridor(PAINEL_PC_IMAGEM, 47891) + """
+          """/// Canal do painel do Arcano Design (o conector conversa com o programa por aqui, com senha).
+const ARCANO_PORTA: u16 = 47891;
+
 /// O token do canal do painel (ArcanoDesign/controle.token, criado na 1ª vez) e as pastas que o
 /// painel pode abrir/gravar pelo canal, quando nada disso veio na linha de comando.
 fn arcano_controle(
@@ -541,10 +509,16 @@ fn arcano_controle(
 }
 
 /// The control server's port, token and workspace, when it is on (exits 2 on a bad configuration).""")
-    # Menu Ajuda: reabrir o painel.
-    troca(r, "crates/engine/src/shell_commands.rs", '    ("help.website", "Voltar ao início", &["Help"], None),\n',
-          '    ("help.github", "Painel do Arcano Design", &["Help"], None),\n    ("help.website", "Voltar ao início", &["Help"], None),\n')
-    troca(r, "crates/ui-egui/src/links.rs", f'pub const GITHUB: &str = "{VOLTAR}";', f'pub const GITHUB: &str = "{PAINEL_PC_IMAGEM}";')
+    # O painel dentro da janela (coluna à direita) + a trava de login.
+    arq = pathlib.Path(__file__).parent / "arquivos"
+    copia(arq / "painel_arcano.rs", pathlib.Path(r) / "apps/photocraft/src/painel_arcano.rs")
+    copia(arq / "photocraft-host-arcano.rs", pathlib.Path(r) / "apps/photocraft/src/host_arcano.rs")
+    troca(r, m, "mod app_dirs;", "mod app_dirs;\nmod host_arcano;\nmod painel_arcano;")
+    troca(r, m, "            Ok(Box::new(app))\n        }),", "            Ok(Box::new(host_arcano::Host::new(app)))\n        }),")
+    # barra de título do sistema (a do editor ficaria embaixo da coluna do painel)
+    troca(r, m, "    CUSTOM_TITLEBAR && !prefs.interface.system_title_bar\n}", "    let _ = (CUSTOM_TITLEBAR, prefs.interface.system_title_bar);\n    false\n}")
+    p = pathlib.Path(r) / "apps/photocraft/Cargo.toml"
+    p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
 
 
 def desktop(app, raiz):
