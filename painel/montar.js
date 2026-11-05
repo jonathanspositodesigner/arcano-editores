@@ -103,7 +103,7 @@
         (d.arquivos || []).forEach(function (a) { try { if (ec.putFile) { ec.putFile(a.caminho, a.bytes); } } catch (e) { /* editor antigo */ } });
         antes = fotografar();
       }
-      Promise.resolve(ec.request('script.run', { code: String(d.codigo || ''), name: 'arcano-motion', console: true }))
+      Promise.resolve(ec.request('engine.execute', { command: 'script.run', params: { code: String(d.codigo || ''), name: 'arcano-motion', console: true } }))
         .then(function (r) {
           r = r || {};
           var arquivos = novos();
