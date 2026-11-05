@@ -205,6 +205,20 @@ def effectcraft(r):
     troca(r, "apps/effectcraft-web/web/manifest.webmanifest",
           '"short_name": "EffectCraft"', '"short_name": "Arcano Vídeo"')
 
+    # ── Compatibilidade com a biblioteca do plugin (arcano.jsx), testada no motor de script ──
+    # O plugin grava quadros/arquivos pelo script (no navegador vão para a memória do editor e
+    # voltam ao PC pelo conector): liberado por padrão.
+    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    allow_scripts_write_files: bool = false,", "    allow_scripts_write_files: bool = true,")
+    # matchName do Keylight no After ("Keylight 906"): o editor tem o Key Light com outros apelidos.
+    troca(r, "crates/effects/src/keylight.rs", 'pub const KEYLIGHT_ALIASES: &[&str] = &["Keylight (1.2)", "Keylight"];',
+          'pub const KEYLIGHT_ALIASES: &[&str] = &["Keylight (1.2)", "Keylight", "Keylight 906"];')
+    # app.purge(PurgeTarget.ALL_CACHES) (limpar cache): o enum do After.
+    troca(r, "crates/script/src/prelude.js", "var app = {",
+          "var PurgeTarget = { ALL_CACHES: 1, UNDO_CACHES: 2, SNAPSHOT_CACHES: 3, IMAGE_CACHES: 4, ALL_MEMORY_CACHES: 5 };\nvar app = {")
+    # outputModule.applyTemplate("H.264") com o módulo já em H.264: o After aceita; o editor dava "nothing to change".
+    troca(r, "crates/script/src/prelude.js",
+          '    __call("renderQueue.setOutputModule", { item: this.__rq.__id, module: this.__n, format: f });\n  },\n  remove: function () { throw __err("removing output modules is not supported"); },',
+          '    try { __call("renderQueue.setOutputModule", { item: this.__rq.__id, module: this.__n, format: f }); }\n    catch (e) { if (String(e).indexOf("nothing to change") < 0) throw e; }\n  },\n  remove: function () { throw __err("removing output modules is not supported"); },')
     # ── Ponte com o plugin Arcano Motion (espelho): arquivos do PC no editor ──
     # O plugin trabalha com caminhos do PC (importar logo/vídeo, salvar quadros). O shim copia o
     # arquivo para a memória do editor com o MESMO caminho (putFile) e devolve ao PC o que o
