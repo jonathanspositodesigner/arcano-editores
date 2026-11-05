@@ -164,3 +164,18 @@ window.ARCANO_I18N = {"exato": {"Skill Arcano Design": ["Arcano Design Skill", "
   };
   for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
 })(window.ARCANO_I18N);
+
+/* Prévia das vozes (1.2.30) */
+(function (D) {
+  var e = {
+    "Ouvir esta voz": ["Listen to this voice", "Escuchar esta voz"],
+    "Parar": ["Stop", "Detener"],
+    "Ouvir todas as vozes": ["Listen to all voices", "Escuchar todas las voces"],
+    "prévia grátis": ["free preview", "vista previa gratis"],
+    "Usar esta voz": ["Use this voice", "Usar esta voz"],
+    "A prévia dessa voz ainda está sendo preparada. Tente de novo em alguns segundos.": ["This voice preview is still being prepared. Try again in a few seconds.", "La vista previa de esta voz aún se está preparando. Inténtalo de nuevo en unos segundos."],
+    "Não consegui tocar a prévia. Tente de novo.": ["Couldn't play the preview. Try again.", "No pude reproducir la vista previa. Inténtalo de nuevo."],
+    "Não consegui preparar a prévia dessa voz agora. Tente de novo em instantes.": ["Couldn't prepare this voice preview right now. Try again in a moment.", "No pude preparar la vista previa de esta voz ahora. Inténtalo de nuevo en un momento."]
+  };
+  for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
+})(window.ARCANO_I18N);

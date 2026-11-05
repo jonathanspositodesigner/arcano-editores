@@ -746,5 +746,7 @@
       if (MODO_PC) { document.title = 'Arcano Motion'; vigiarProgramaPC(); }
     });
   }
+  // atualizador (igual ao After): o sw.js serve a versão que o painel instalou pelo botão "Baixar e instalar"
+  try { if (navigator.serviceWorker) { navigator.serviceWorker.register(EXT_DIR + '/sw.js', { scope: EXT_DIR + '/' }).catch(function (e) { console.warn('[Arcano] atualizador', e); }); } } catch (e) {}
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', iniciar); } else { iniciar(); }
 })();

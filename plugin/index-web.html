@@ -470,7 +470,12 @@
       </button>
       <div class="aud-campo">
         <label class="aud-rotulo" for="aud-voz">Voz da narração</label>
-        <select id="aud-voz"></select>
+        <div class="aud-voz-linha">
+          <select id="aud-voz"></select>
+          <button class="aud-play" type="button" id="aud-voz-ouvir" title="Ouvir esta voz" aria-label="Ouvir esta voz"><span class="aud-play-ic" aria-hidden="true"></span></button>
+        </div>
+        <button class="aud-vozes-abrir" type="button" id="aud-vozes-abrir" aria-expanded="false"><span>Ouvir todas as vozes</span><small>prévia grátis</small><span class="aud-vozes-seta" aria-hidden="true">▾</span></button>
+        <div class="aud-vozes" id="aud-vozes" hidden></div>
       </div>
       <div class="aud-minha" id="aud-minha" hidden>
         <div class="aud-minha-linha"><span class="aud-minha-ic" aria-hidden="true">●</span><span class="nota" id="aud-minha-txt"></span></div>
@@ -882,7 +887,7 @@
   <p class="lead" id="erro-texto">O painel abriu, mas o Node.js do After não está disponível. Reinstale o Arcano Motion e reinicie o After.</p>
 </section>
 
-<script>window.ARCANO_WEB_VERSAO = "1.2.29"; window.ARCANO_SCRIPTS = ["js/host.js", "js/licenca-config.js", "js/catalogo.js", "js/movimentos.js", "js/lut-psd.js", "js/i18n-dados.js", "js/i18n.js", "js/qrcode.js", "js/sinonimos.js", "js/app.js"];</script>
+<script>window.ARCANO_WEB_VERSAO = "1.2.30"; window.ARCANO_SCRIPTS = ["js/host.js", "js/licenca-config.js", "js/catalogo.js", "js/movimentos.js", "js/lut-psd.js", "js/i18n-dados.js", "js/i18n.js", "js/qrcode.js", "js/sinonimos.js", "js/app.js"];</script>
 <script src="web/buffer.js"></script>
 <script src="web/shim.js"></script>
 </body>

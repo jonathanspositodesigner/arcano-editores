@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSAO = '1.2.29';
+  var VERSAO = '1.2.30';
   var VERSOES_MCP = ['2025-06-18', '2025-03-26', '2024-11-05'];
   var cep = window.__adobe_cep__;
 
@@ -3044,6 +3044,7 @@
   }
 
   function abrirAba(qual, manterDetalhe) {
+    if (qual !== 'aud' && previaVoz && previaVoz.tocando) { pararPreviaVoz(); }
     try { esconderBalao(); } catch (eB) {}
     if (!abaInfo(qual) && qual !== 'chat') { qual = 'chat'; }
     if ((qual === 'camera' || qual === 'foco') && !parallaxAtivo) {
@@ -7061,8 +7062,8 @@
 
   function verificarAtualizacaoPlugin(cb) {
     var url = (window.ARCANO_APP || {}).atualizacao;
-    // no navegador o espelho já é sempre a versão publicada: nada para instalar
-    if (!url || !node || window.ARCANO_NAVEGADOR) { if (cb) { cb(null); } return; }
+    // no navegador (Arcano Layers) é igual: avisa e instala pelo botão (instalarNoNavegador, cache + sw.js)
+    if (!url || !node) { if (cb) { cb(null); } return; }
     lerJSONUrl(url, function (e, info) {
       info = e ? null : infoDoSistema(info);
       if (e || !info || !info.versao || !info.url) { if (cb) { cb(null); } return; }
@@ -7332,6 +7333,23 @@
       if (recarregar) { recarregarPainel(); return; }
       if (arquivoPronto) { abrirInstalador(arquivoPronto, status); return; }
       var z = zipDaAtualizacao(info);
+      if (window.ARCANO_NAVEGADOR) {
+        // navegador: o mesmo zip, guardado no cache do navegador (não há pasta da extensão para gravar)
+        if (!z) { status('Essa versão ainda não tem pacote para o navegador.', 'erro'); return; }
+        baixar.disabled = true; status('Baixando a versão ' + info.versao + '...');
+        baixarNaMemoria(z.url, function (erro, buf) {
+          if (erro) { baixar.disabled = false; status(erro + ' Tente de novo.', 'erro'); return; }
+          if (z.sha256 && R('crypto').createHash('sha256').update(buf).digest('hex').toLowerCase() !== String(z.sha256).toLowerCase()) {
+            baixar.disabled = false; status('O arquivo baixado veio diferente do publicado (conferência falhou). Tente de novo.', 'erro'); return;
+          }
+          status('Instalando a versão ' + info.versao + '...');
+          instalarNoNavegador(buf, info.versao, function (e2) {
+            if (e2) { baixar.disabled = false; status('Não consegui instalar no navegador (' + e2 + '). Tente de novo.', 'erro'); return; }
+            pronto();
+          });
+        });
+        return;
+      }
       if (!z) { if (ehMac()) { comandoMac('versão sem pacote'); } else { viaInstalador(); } return; }
       baixar.disabled = true; status('Baixando a versão ' + info.versao + '...');
       var zip = R('path').join(R('os').tmpdir(), 'ArcanoMotion-' + nomeArquivoSeguro(info.versao).replace(/_/g, '.') + '.zip');
@@ -7351,6 +7369,65 @@
         });
       });
     });
+  }
+
+  // ---- navegador (Arcano Layers): a mesma atualização do After, guardada no Cache Storage ----
+  // Baixa o zip publicado para a memória (pelo Arcano Conector, sem CORS), põe cada arquivo de com.arcano.motion/
+  // em 'arcano-plugin-<versão>' com o endereço que ele tem em /plugin/, monta o index-web.html (mesma troca do
+  // web/gerar-espelho.sh) e marca a versão como ativa. O sw.js serve esses arquivos no lugar dos do servidor.
+  function baixarNaMemoria(url, cb, saltos) {
+    saltos = saltos || 0;
+    var feito = false, fim = function (e, b) { if (!feito) { feito = true; cb(e, b); } }, req;
+    try {
+      req = atualizacaoHttps().get(url, { headers: { 'Cache-Control': 'no-cache' } }, function (res) {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers && res.headers.location && saltos < 5) { res.resume(); feito = true; baixarNaMemoria(new URL(res.headers.location, url).toString(), cb, saltos + 1); return; }
+        if (res.statusCode !== 200) { res.resume(); fim('Não consegui baixar a versão nova (HTTP ' + res.statusCode + ').'); return; }
+        var partes = [];
+        res.on('data', function (d) { partes.push(d); });
+        res.on('end', function () { fim(null, R('buffer').Buffer.concat(partes)); });
+        res.on('error', function (e) { fim('Não consegui baixar a versão nova: ' + e.message); });
+      });
+    } catch (e0) { fim('Não consegui baixar a versão nova: ' + e0.message); return; }
+    req.on('error', function (e) { fim('Não consegui baixar a versão nova: ' + e.message); });
+    req.setTimeout(180000, function () { req.abort(); fim('O download demorou demais.'); });
+  }
+  var TIPOS_WEB = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', jsx: 'text/plain; charset=utf-8', css: 'text/css; charset=utf-8',
+    json: 'application/json', md: 'text/markdown; charset=utf-8', txt: 'text/plain; charset=utf-8', xml: 'application/xml', svg: 'image/svg+xml',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', ico: 'image/x-icon',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', wav: 'audio/wav', mp3: 'audio/mpeg', mp4: 'video/mp4' };
+  // index.html do plugin → index-web.html (tira os <script src> e põe o shim, que carrega eles depois do conector)
+  function indexWeb(html, versao) {
+    var scripts = [];
+    html = html.replace(/<script src="([^"]+)"><\/script>\s*/g, function (m, s) { scripts.push(s); return ''; });
+    var cab = '<script>window.ARCANO_WEB_VERSAO = ' + JSON.stringify(versao) + '; window.ARCANO_SCRIPTS = ' + JSON.stringify(scripts) + ';</script>\n' +
+      '<script src="web/buffer.js"></script>\n<script src="web/shim.js"></script>\n';
+    var i = html.lastIndexOf('</body>');
+    return i < 0 || !scripts.length ? null : html.slice(0, i) + cab + html.slice(i);
+  }
+  function instalarNoNavegador(buf, versao, cb) {
+    var base = new URL('.', location.href).href, arquivos = {}, PREF = 'com.arcano.motion/', nome = 'arcano-plugin-' + versao;
+    try {
+      if (!window.caches || !navigator.serviceWorker) { cb('este navegador não deixa guardar a versão nova'); return; }
+      lerZip(buf).forEach(function (it) { if (it.nome.indexOf(PREF) === 0) { arquivos[it.nome.slice(PREF.length)] = it.dados; } });
+      if (!arquivos['js/app.js'] || !arquivos['index.html'] || !arquivos['web/shim.js'] || !arquivos['sw.js']) { cb('pacote incompleto'); return; }
+      var iw = indexWeb(arquivos['index.html'].toString('utf8'), versao);
+      if (!iw) { cb('index.html sem scripts'); return; }
+      arquivos['index-web.html'] = R('buffer').Buffer.from(iw, 'utf8');
+    } catch (e) { cb(e.message); return; }
+    navigator.serviceWorker.getRegistration(base).then(function (reg) {
+      if (!reg) { throw new Error('o navegador ainda não ativou o atualizador; recarregue a página e tente de novo'); }
+      return caches.delete(nome).then(function () { return caches.open(nome); });
+    }).then(function (c) {
+      return Promise.all(Object.keys(arquivos).map(function (p) {
+        var ext = (p.split('.').pop() || '').toLowerCase();
+        return c.put(new URL(p, base).href, new Response(new Blob([arquivos[p]]), { headers: { 'Content-Type': TIPOS_WEB[ext] || 'application/octet-stream' } }));
+      }));
+    }).then(function () { return caches.open('arcano-plugin-ativa'); })
+      .then(function (c) { return c.put(base + '__ativa__', new Response(versao)); })
+      .then(function () { return caches.keys(); })
+      .then(function (ks) { return Promise.all(ks.filter(function (k) { return k.indexOf('arcano-plugin-') === 0 && k !== nome && k !== 'arcano-plugin-ativa'; }).map(function (k) { return caches.delete(k); })); })
+      .then(function () { var sw = navigator.serviceWorker.controller; if (sw) { sw.postMessage({ arcano: 'versao' }); } cb(null); },
+        function (e) { cb(String((e && e.message) || e)); });
   }
 
   // recarrega o painel com a versão nova (salva a conversa antes; o .jsx novo é carregado sozinho porque a versão mudou)
@@ -9651,10 +9728,101 @@
     abrirAba('aud');
     var radio = document.querySelector('input[name="aud-modo"][value="' + j.tipo + '"]');
     if (radio) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
-    if (j.tipo === 'narracao') { $('aud-texto').value = j.fala || ''; $('aud-voz').value = j.voz || 'Kore'; $('aud-estilo').value = j.estilo || ''; $('aud-texto').focus(); }
+    if (j.tipo === 'narracao') { $('aud-texto').value = j.fala || ''; $('aud-voz').value = j.voz || 'Kore'; $('aud-estilo').value = j.estilo || ''; mostrarMinhaVoz(); $('aud-texto').focus(); }
     else { $('aud-trilha-estilo').value = j.estilo || ''; $('aud-duracao').value = j.duracao || 30; $('aud-instrumental').checked = j.instrumental !== false; $('aud-letra').value = j.letra || ''; $('aud-versao').value = j.versao || 'V6'; trocarInstrumental(); }
     trocarModoAud();
   }
+  // ----- prévia das vozes (1.2.30): grátis, gerada uma vez no servidor (rota voz-previa) e tocada daqui -----
+  var previaVoz = { urls: {}, audio: null, tocando: null, vez: 0 };
+  function urlPreviaVoz(voz, cb, tentativa) {
+    var k = idiomaAtual() + '|' + voz, c = previaVoz.urls[k];
+    if (c && c.ate > Date.now()) { cb(null, c.url); return; }
+    appFuncao('voz-previa', { voz: voz, idioma: idiomaAtual() }, function (e, j) {
+      if (e) { cb(e); return; }
+      if (j && j.url) { previaVoz.urls[k] = { url: j.url, ate: Date.now() + 20 * 3600000 }; cb(null, j.url); return; }
+      if (j && j.gerando && (tentativa || 0) < 5) { setTimeout(function () { urlPreviaVoz(voz, cb, (tentativa || 0) + 1); }, 3000); return; }
+      cb('A prévia dessa voz ainda está sendo preparada. Tente de novo em alguns segundos.');
+    }, 95000);
+  }
+  function marcarPreviaVoz(voz, estado) {
+    var bs = document.querySelectorAll('#painel-aud .aud-play');
+    for (var i = 0; i < bs.length; i++) {
+      var v = bs[i].id === 'aud-voz-ouvir' ? $('aud-voz').value : bs[i].getAttribute('data-voz');
+      var eu = !!voz && v === voz;
+      bs[i].classList.toggle('carregando', eu && estado === 'carregando');
+      bs[i].classList.toggle('tocando', eu && estado === 'tocando');
+      var t = eu && estado ? 'Parar' : 'Ouvir esta voz';
+      bs[i].title = t; bs[i].setAttribute('aria-label', t);
+    }
+  }
+  function pararPreviaVoz() {
+    previaVoz.vez++;
+    if (previaVoz.audio) { try { previaVoz.audio.pause(); } catch (e) {} previaVoz.audio = null; }
+    previaVoz.tocando = null;
+    marcarPreviaVoz(null, '');
+  }
+  function tocarPreviaVoz(voz) {
+    if (!voz || voz === VOZ_MINHA) { return; }
+    if (previaVoz.tocando === voz) { pararPreviaVoz(); return; }
+    pararPreviaVoz();
+    var vez = previaVoz.vez;
+    try { if (bibAudio && !bibAudio.paused) { pararSomBib(); } } catch (e) {}
+    previaVoz.tocando = voz;
+    marcarPreviaVoz(voz, 'carregando');
+    urlPreviaVoz(voz, function (e, url) {
+      if (vez !== previaVoz.vez) { return; }
+      if (e) { pararPreviaVoz(); mostrarToast(e, true); return; }
+      var a = new Audio(url), falhou = function () {
+        if (previaVoz.audio !== a) { return; }
+        delete previaVoz.urls[idiomaAtual() + '|' + voz];
+        pararPreviaVoz();
+        mostrarToast('Não consegui tocar a prévia. Tente de novo.', true);
+      };
+      previaVoz.audio = a;
+      a.addEventListener('ended', function () { if (previaVoz.audio === a) { pararPreviaVoz(); } });
+      a.addEventListener('error', falhou);
+      marcarPreviaVoz(voz, 'tocando');
+      try { var p = a.play(); if (p && p.catch) { p.catch(falhou); } } catch (e2) { falhou(); }
+    });
+  }
+  function montarListaVozes() {
+    var caixa = $('aud-vozes'); if (!caixa || caixa.childNodes.length) { return; }
+    VOZES_AUDIO.forEach(function (g) {
+      var grupo = document.createElement('div'); grupo.className = 'aud-vozes-grupo';
+      var tit = document.createElement('span'); tit.textContent = g[0]; grupo.appendChild(tit);
+      var grade = document.createElement('div'); grade.className = 'aud-vozes-grade';
+      g[1].forEach(function (v) {
+        var it = document.createElement('div'); it.className = 'aud-voz-item'; it.setAttribute('data-voz', v);
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'aud-play'; b.setAttribute('data-voz', v);
+        b.title = 'Ouvir esta voz'; b.setAttribute('aria-label', 'Ouvir esta voz');
+        var ic = document.createElement('span'); ic.className = 'aud-play-ic'; ic.setAttribute('aria-hidden', 'true'); b.appendChild(ic);
+        b.addEventListener('click', function () { tocarPreviaVoz(v); });
+        var n = document.createElement('button'); n.type = 'button'; n.className = 'aud-voz-nome'; n.textContent = v; n.title = 'Usar esta voz';
+        n.addEventListener('click', function () { var sel = $('aud-voz'); sel.value = v; sel.dispatchEvent(new Event('change')); });
+        it.appendChild(b); it.appendChild(n); grade.appendChild(it);
+      });
+      grupo.appendChild(grade); caixa.appendChild(grupo);
+    });
+    marcarVozEscolhida();
+  }
+  function marcarVozEscolhida() {
+    var v = $('aud-voz').value, its = document.querySelectorAll('#aud-vozes .aud-voz-item');
+    for (var i = 0; i < its.length; i++) { its[i].classList.toggle('ativo', its[i].getAttribute('data-voz') === v); }
+    if ($('aud-voz-ouvir')) { $('aud-voz-ouvir').disabled = v === VOZ_MINHA; }
+    marcarPreviaVoz(previaVoz.tocando, previaVoz.audio ? 'tocando' : (previaVoz.tocando ? 'carregando' : ''));
+  }
+  function ligarPreviaVozes() {
+    if (!$('aud-voz-ouvir')) { return; }
+    $('aud-voz-ouvir').addEventListener('click', function () { tocarPreviaVoz($('aud-voz').value); });
+    $('aud-vozes-abrir').addEventListener('click', function () {
+      var c = $('aud-vozes'), abrir = c.hidden;
+      if (abrir) { montarListaVozes(); }
+      c.hidden = !abrir;
+      $('aud-vozes-abrir').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    });
+    marcarVozEscolhida();
+  }
+
   function ligarAudioIA() {
     if (!$('painel-aud')) { return; }
     var sel = $('aud-voz');
@@ -9680,6 +9848,7 @@
     $('aud-texto').addEventListener('input', atualizarCustosIA);
     $('aud-estilo').addEventListener('input', atualizarCustosIA);
     $('aud-btn-gerar').addEventListener('click', gerarAudioPainel);
+    ligarPreviaVozes();
     amigavelIA($('painel-aud'));
     trocarInstrumental();
     trocarModoAud();
@@ -9704,6 +9873,7 @@
   }
   function mostrarMinhaVoz() {
     var caixa = $('aud-minha'); if (!caixa) { return; }
+    marcarVozEscolhida();
     var usando = $('aud-voz').value === VOZ_MINHA;
     caixa.hidden = !usando;
     if (!usando) { return; }
@@ -13890,6 +14060,7 @@
   var somVez = 0;
   function pararSomBib() {
     somVez++;
+    if (previaVoz && previaVoz.tocando) { pararPreviaVoz(); }
     if (bibAudio) { try { bibAudio.pause(); } catch (e) {} }
     var tocando = document.querySelectorAll('.bib-item.tocando');
     for (var k = 0; k < tocando.length; k++) { tocando[k].classList.remove('tocando'); var t = tocando[k].querySelector('.bib-tocar'); if (t) { t.textContent = '▶'; } }
