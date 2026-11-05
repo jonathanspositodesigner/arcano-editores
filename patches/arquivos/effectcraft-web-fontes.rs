@@ -159,3 +159,10 @@ pub fn fontes_adicionar(fontes: js_sys::Array) -> u32 {
 pub fn aep_pedidos() -> String {
     json!(effectcraft_engine::arcano_aep::pendentes()).to_string()
 }
+
+/// Arquivo ▸ Salvar como projeto do After: pedidos para o painel (JSON, lista de {tipo, nome}).
+#[wasm_bindgen(js_name = arcanoAepSalvar)]
+pub fn aep_salvar() -> String {
+    let lista: Vec<serde_json::Value> = effectcraft_engine::arcano_aep::pedidos_salvar().iter().filter_map(|p| serde_json::from_str(p).ok()).collect();
+    json!(lista).to_string()
+}

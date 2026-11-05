@@ -673,3 +673,411 @@ if __name__ == "__main__":
     r = json.loads(converter(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else sys.argv[1]))
     sys.stdout.write(r["jsx"])
     sys.stderr.write("\n".join(r["avisos"]) + "\n")
+
+
+# =====================================================================================================
+# Editor -> projeto do After (.aep): "Arquivo > Salvar como projeto do After". O painel lê o projeto
+# do editor com um script no modelo do After (app.project, camadas, propriedades com matchName,
+# keyframes com easing) e manda o JSON para cá; o py-aep grava o .aep. O que o py-aep não sabe criar
+# do zero (efeitos fora o Transformar, que o After só tem na própria instalação) sai do .aep e vira aviso.
+# =====================================================================================================
+
+from py_aep.enums import KeyframeInterpolationType
+
+
+def _cor3(c):
+    c = list(c or [0, 0, 0])[:3]
+    while len(c) < 3:
+        c.append(0)
+    return [max(0.0, min(1.0, float(x))) for x in c]
+
+
+def _limite(x, lo, hi):
+    return max(lo, min(hi, x))
+
+
+class Gravador:
+    def __init__(self, dados: dict, windows: bool):
+        self.d = dados
+        self.windows = windows
+        self.avisos: list[str] = []
+        self.app = py_aep.new(platform="windows" if windows else "macos")
+        self.pr = self.app.project
+        self.itens: dict = {}  # id do editor -> item do py-aep
+        self.efeitos_fora: dict = {}
+
+    def aviso(self, t: str):
+        if t not in self.avisos and len(self.avisos) < 400:
+            self.avisos.append(t)
+
+    # ---------------------------------------------------------------- itens
+    def pasta(self, pid):
+        if not pid:
+            return self.pr.root_folder
+        if pid in self.itens:
+            return self.itens[pid]
+        d = self.por_id.get(pid)
+        if not d or d.get("tipo") != "pasta":
+            return self.pr.root_folder
+        f = self.pasta(d.get("pai")).add_folder(d.get("nome") or "Pasta")
+        self.itens[pid] = f
+        return f
+
+    def arquivo(self, d):
+        from py_aep.data.file_formats import get_file_format
+        from py_aep.models.items.footage import FootageItem
+        from py_aep.models.sources.file import FileSource
+
+        caminho = d.get("arquivo") or ""
+        w, h = int(d.get("w") or 1920), int(d.get("h") or 1080)
+        dur = float(d.get("dur") or 0)
+        fps = float(d.get("fps") or 0)
+        ext = caminho.rsplit(".", 1)[-1].lower() if "." in caminho else ""
+        try:
+            fmt = get_file_format("." + ext)
+            parado = bool(d.get("still")) or dur <= 0
+            fonte = FileSource._new(
+                caminho,
+                source_format=fmt.source_format,
+                width=_limite(w, 1, 30000),
+                height=_limite(h, 1, 30000),
+                duration=0.0 if parado else dur,
+                frame_rate=0.0 if parado else (fps or 30.0),
+                has_alpha=ext in ("png", "psd", "tif", "tiff", "tga", "webp", "mov", "exr"),
+                audio_sample_rate=48000.0 if d.get("audio") else 0.0,
+                windows=self.windows,
+            )
+            item = FootageItem._new(fonte, project=self.pr, parent_folder=self.pr.root_folder)
+            cont = self.pr.root_folder._children_container
+            cont.append(item._item_list)
+            cont.extend(item._view_data)
+            self.pr.items[item.id] = item
+            self.pr.root_folder.items.append(item)
+        except Exception as e:  # formato que o py-aep não conhece: espaço reservado com o mesmo tamanho
+            self.aviso(f"arquivo {caminho or d.get('nome')}: entrou como espaço reservado ({e})")
+            item = self.pr.import_placeholder(d.get("nome") or "Arquivo", _limite(w, 4, 30000), _limite(h, 4, 30000),
+                                              _limite(fps or 30.0, 1.0, 99.0), _limite(dur or 10.0, 0.04, 10800.0))
+        try:
+            item.name = d.get("nome") or item.name
+        except Exception:
+            pass
+        return item
+
+    def mover(self, item, pid):
+        if not pid:
+            return
+        try:
+            item.parent_folder = self.pasta(pid)
+        except Exception as e:
+            self.aviso(f"{getattr(item, 'name', '?')}: não deu para pôr na pasta ({e})")
+
+    # ---------------------------------------------------------------- valores
+    def valor(self, prop, v):
+        if isinstance(v, dict):
+            if "forma" in v:
+                f = v["forma"]
+                return py_aep.Shape(f.get("v") or [], f.get("i"), f.get("o"), closed=bool(f.get("c", True)))
+            if "texto" in v:
+                t = v["texto"]
+                doc = prop.value
+                try:
+                    doc.text = t.get("t", "")
+                    if t.get("fonte"):
+                        doc.font = t["fonte"]
+                    if t.get("tam"):
+                        doc.font_size = float(t["tam"])
+                    if t.get("cor") is not None:
+                        doc.fill_color = _cor3(t["cor"])
+                    if "preenche" in t:
+                        doc.apply_fill = bool(t["preenche"])
+                    if t.get("contorno") is not None:
+                        doc.stroke_color = _cor3(t["contorno"])
+                    if "contornar" in t:
+                        doc.apply_stroke = bool(t["contornar"])
+                    if t.get("largura") is not None:
+                        doc.stroke_width = float(t["largura"])
+                    if t.get("espaco") is not None:
+                        doc.tracking = float(t["espaco"])
+                    if t.get("entrelinha"):
+                        doc.leading = float(t["entrelinha"])
+                    if t.get("just") and hasattr(ParagraphJustification, t["just"]):
+                        doc.justification = getattr(ParagraphJustification, t["just"])
+                except Exception as e:
+                    self.aviso(f"texto: {e}")
+                return doc
+        return v
+
+    def chaves(self, prop, chaves, rotulo):
+        for k in chaves:
+            try:
+                prop.set_value_at_time(float(k["t"]), self.valor(prop, k.get("v")))
+            except Exception as e:
+                self.aviso(f"{rotulo}: keyframe em {k.get('t')} s não entrou ({e})")
+                continue
+            try:
+                kf = prop.nearest_key(float(k["t"]))
+                ii, oi = k.get("ii"), k.get("oi")
+                if ii and hasattr(KeyframeInterpolationType, ii):
+                    kf.in_interpolation_type = getattr(KeyframeInterpolationType, ii)
+                if oi and hasattr(KeyframeInterpolationType, oi):
+                    kf.out_interpolation_type = getattr(KeyframeInterpolationType, oi)
+                if k.get("ie"):
+                    kf.in_temporal_ease = [py_aep.KeyframeEase(float(e[0]), _limite(float(e[1]), 0.1, 100.0)) for e in k["ie"]]
+                if k.get("oe"):
+                    kf.out_temporal_ease = [py_aep.KeyframeEase(float(e[0]), _limite(float(e[1]), 0.1, 100.0)) for e in k["oe"]]
+            except Exception as e:
+                self.aviso(f"{rotulo}: suavização do keyframe em {k.get('t')} s ({e})")
+
+    def props(self, grupo, lista, rotulo, indexado=False):
+        for p in lista or []:
+            mn = p.get("mn")
+            if not mn:
+                continue
+            nome = f"{rotulo} > {p.get('nome') or mn}"
+            if "g" in p:  # grupo
+                if mn == "ADBE Effect Parade":
+                    self.efeitos(grupo, p, rotulo)
+                    continue
+                try:
+                    filho = grupo.add_property(mn) if indexado else grupo.property(mn)
+                except Exception as e:
+                    self.aviso(f"{nome}: não entrou ({e})")
+                    continue
+                if filho is None:
+                    self.aviso(f"{nome}: não existe no After")
+                    continue
+                if indexado and p.get("nome"):
+                    try:
+                        filho.name = p["nome"]
+                    except Exception:
+                        pass
+                for chave in ("modo", "inverter"):
+                    if chave in p:
+                        try:
+                            if chave == "modo" and hasattr(MaskMode, p["modo"]):
+                                filho.mask_mode = getattr(MaskMode, p["modo"])
+                            if chave == "inverter":
+                                filho.inverted = bool(p["inverter"])
+                        except Exception:
+                            pass
+                if p.get("separado"):
+                    try:
+                        filho.dimensions_separated = True
+                    except Exception:
+                        pass
+                self.props(filho, p["g"], nome, bool(p.get("i")))
+                continue
+            try:
+                prop = grupo.property(mn)
+            except Exception:
+                prop = None
+            if prop is None:
+                self.aviso(f"{nome}: não existe no After")
+                continue
+            if p.get("separado"):
+                try:
+                    prop.dimensions_separated = True
+                except Exception:
+                    pass
+            if p.get("k"):
+                self.chaves(prop, p["k"], nome)
+            elif "v" in p:
+                try:
+                    prop.value = self.valor(prop, p["v"])
+                except Exception as e:
+                    self.aviso(f"{nome}: valor não entrou ({e})")
+            if p.get("e"):
+                try:
+                    prop.expression = p["e"]
+                    if p.get("eoff"):
+                        prop.expression_enabled = False
+                except Exception as e:
+                    self.aviso(f"{nome}: expressão não entrou ({e})")
+
+    def efeitos(self, camada, p, rotulo):
+        try:
+            grupo = camada.property("ADBE Effect Parade")
+        except Exception:
+            grupo = None
+        for fx in p.get("g") or []:
+            mn = fx.get("mn")
+            try:
+                novo = grupo.add_property(mn) if grupo is not None else None
+            except Exception:
+                novo = None
+            if novo is None:
+                self.efeitos_fora[fx.get("nome") or mn] = self.efeitos_fora.get(fx.get("nome") or mn, 0) + 1
+                continue
+            try:
+                if fx.get("nome"):
+                    novo.name = fx["nome"]
+                if fx.get("desligado"):
+                    novo.enabled = False
+            except Exception:
+                pass
+            self.props(novo, fx.get("g"), f"{rotulo} > {fx.get('nome') or mn}")
+
+    def marcas(self, prop, lista, rotulo):
+        if prop is None or not lista:
+            return
+        for m in lista:
+            try:
+                mv = py_aep.MarkerValue(str(m.get("c") or ""), str(m.get("cap") or ""))
+                if m.get("d"):
+                    mv.duration = float(m["d"])
+                prop.set_value_at_time(float(m.get("t") or 0), mv)
+            except Exception as e:
+                self.aviso(f"{rotulo}: marcador em {m.get('t')} s ({e})")
+
+    # ---------------------------------------------------------------- camadas
+    def camada(self, comp, c, rotulo):
+        mn = c.get("mn")
+        if mn == "ADBE Text Layer":
+            caixa = c.get("caixa")
+            return comp.add_box_text(caixa, c.get("texto", "")) if caixa else comp.add_text(c.get("texto", ""))
+        if mn == "ADBE Vector Layer":
+            return comp.add_shape()
+        if mn == "ADBE Camera Layer":
+            return comp.add_camera(c.get("nome"), [comp.width / 2, comp.height / 2])
+        if mn == "ADBE Light Layer":
+            return comp.add_light(c.get("nome"), [comp.width / 2, comp.height / 2])
+        if c.get("nulo"):
+            return comp.add_null()
+        f = self.por_id.get(c.get("fonte"))
+        if f and f.get("tipo") == "solido":
+            return comp.add_solid(_cor3(f.get("cor")), f.get("nome"), _limite(int(f.get("w") or comp.width), 1, 30000),
+                                  _limite(int(f.get("h") or comp.height), 1, 30000), float(f.get("pa") or 1.0))
+        item = self.itens.get(c.get("fonte"))
+        if item is None:
+            self.aviso(f"{rotulo}: sem a fonte, entrou como nulo")
+            return comp.add_null()
+        return comp.add(item)
+
+    def atributos(self, L, c, rotulo):
+        def por(attr, v):
+            try:
+                setattr(L, attr, v)
+            except Exception as e:
+                self.aviso(f"{rotulo}: {attr} ({e})")
+
+        if c.get("nome"):
+            por("name", c["nome"])
+        for a, k in (("three_d_layer", "td"), ("adjustment_layer", "adj"), ("collapse_transformation", "colapso"),
+                     ("motion_blur", "mb"), ("guide_layer", "guia"), ("audio_enabled", "audio")):
+            if c.get(k) is not None and c.get(k) is not False:
+                por(a, bool(c[k]))
+        if c.get("estica") not in (None, 100, 100.0):
+            por("stretch", float(c["estica"]))
+        por("start_time", float(c.get("ini") or 0))
+        por("in_point", float(c.get("inP") or 0))
+        por("out_point", float(c.get("outP") or 0))
+        if c.get("modo") and c["modo"] != "NORMAL" and hasattr(BlendingMode, c["modo"]):
+            por("blending_mode", getattr(BlendingMode, c["modo"]))
+        for a, k in (("shy", "shy"), ("solo", "solo")):
+            if c.get(k):
+                por(a, True)
+        if c.get("ativa") is False:
+            por("enabled", False)
+
+    def comp(self, d, comp):
+        self.marcas(getattr(comp, "marker_property", None), d.get("marcas"), d.get("nome") or "Comp")
+        camadas = d.get("camadas") or []
+        criadas = {}
+        # o py-aep põe cada camada nova no topo: cria de baixo para cima
+        for c in sorted(camadas, key=lambda x: -int(x.get("idx") or 0)):
+            rotulo = f"{d.get('nome')} > {c.get('nome')}"
+            try:
+                L = self.camada(comp, c, rotulo)
+            except Exception as e:
+                self.aviso(f"{rotulo}: não entrou ({e})")
+                continue
+            criadas[int(c.get("idx") or 0)] = L
+            self.atributos(L, c, rotulo)
+            self.props(L, c.get("props"), rotulo)
+            self.marcas(getattr(L, "marker", None), c.get("marcas"), rotulo)
+        # pais e mates depois que todas existem
+        for c in camadas:
+            L = criadas.get(int(c.get("idx") or 0))
+            if L is None:
+                continue
+            rotulo = f"{d.get('nome')} > {c.get('nome')}"
+            if c.get("pai") and criadas.get(int(c["pai"])) is not None:
+                try:
+                    L.parent = criadas[int(c["pai"])]
+                except Exception as e:
+                    self.aviso(f"{rotulo}: pai ({e})")
+            m = c.get("mate")
+            if m and criadas.get(int(m.get("idx") or 0)) is not None and hasattr(TrackMatteType, m.get("tipo", "")):
+                try:
+                    L.set_track_matte(criadas[int(m["idx"])], getattr(TrackMatteType, m["tipo"]))
+                except Exception as e:
+                    self.aviso(f"{rotulo}: fosco ({e})")
+        for c in camadas:  # trava depois (camada travada não aceita mudança)
+            L = criadas.get(int(c.get("idx") or 0))
+            if L is not None and c.get("trava"):
+                try:
+                    L.locked = True
+                except Exception:
+                    pass
+
+    def gravar(self, caminho: str):
+        lista = self.d.get("itens") or []
+        self.por_id = {i.get("id"): i for i in lista}
+        for i in lista:
+            if i.get("tipo") == "pasta":
+                self.pasta(i.get("id"))
+        for i in lista:
+            t = i.get("tipo")
+            try:
+                if t == "arquivo":
+                    self.itens[i["id"]] = self.arquivo(i)
+                elif t == "reservado":
+                    self.itens[i["id"]] = self.pr.import_placeholder(i.get("nome"), _limite(int(i.get("w") or 1920), 4, 30000), _limite(int(i.get("h") or 1080), 4, 30000),
+                                                                     _limite(float(i.get("fps") or 30), 1.0, 99.0), _limite(float(i.get("dur") or 10), 0.04, 10800.0))
+                elif t == "comp":
+                    self.itens[i["id"]] = self.pr.root_folder.add_comp(
+                        i.get("nome") or "Comp", _limite(int(i.get("w") or 1920), 4, 30000), _limite(int(i.get("h") or 1080), 4, 30000),
+                        float(i.get("pa") or 1.0), _limite(float(i.get("dur") or 10), 0.04, 10800.0), _limite(float(i.get("fps") or 30), 1.0, 99.0))
+                    if i.get("fundo"):
+                        try:
+                            self.itens[i["id"]].bg_color = _cor3(i["fundo"])
+                        except Exception:
+                            pass
+            except Exception as e:
+                self.aviso(f"{i.get('nome')}: não entrou ({e})")
+                continue
+            if t in ("arquivo", "reservado", "comp") and i["id"] in self.itens:
+                self.mover(self.itens[i["id"]], i.get("pai"))
+        for i in lista:
+            if i.get("tipo") == "comp" and i["id"] in self.itens:
+                self.comp(i, self.itens[i["id"]])
+        for nome, n in sorted(self.efeitos_fora.items()):
+            self.aviso(f"efeito {nome} ({n}x): o .aep sai sem ele (o After só tem esse efeito na própria instalação)")
+        import os
+
+        if os.path.exists(caminho):  # o py-aep não grava por cima
+            os.remove(caminho)
+        self.pr.save(caminho)
+
+
+def gravar(dados_json: str, windows: bool, caminho: str = "/tmp/saida.aep") -> str:
+    """JSON do projeto do editor -> .aep em `caminho`. Devolve {caminho, avisos} em JSON."""
+    import os.path as _op
+
+    # O py-aep faz `abspath` no caminho do arquivo; aqui (navegador/Pyodide, que é "Linux") um caminho do
+    # Windows (C:\..., \\servidor\...) viraria relativo à pasta atual. Caminho do Windows passa direto.
+    original = _op.abspath
+
+    def _abs(p):
+        t = str(p)
+        if (len(t) > 2 and t[1] == ":" and t[2] in "\\/") or t.startswith("\\\\"):
+            return t
+        return original(t)
+
+    _op.abspath = _abs
+    try:
+        g = Gravador(json.loads(dados_json), bool(windows))
+        g.gravar(caminho)
+    finally:
+        _op.abspath = original
+    return json.dumps({"caminho": caminho, "avisos": g.avisos}, ensure_ascii=False)

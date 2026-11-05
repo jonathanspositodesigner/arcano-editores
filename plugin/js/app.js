@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSAO = '1.2.35';
+  var VERSAO = '1.2.36';
   var VERSOES_MCP = ['2025-06-18', '2025-03-26', '2024-11-05'];
   var cep = window.__adobe_cep__;
 
@@ -243,8 +243,18 @@
       if (mudou || forcarConta) { try { gravarConta(cfg.conta); } catch (e) {} }
     }
     garantirPasta(pastaConfig());
-    R('fs').writeFileSync(arquivoConfig(), JSON.stringify(cfg, null, 2), 'utf8');
+    var gravar = cfg;
+    if (window.ARCANO_SO_FERRAMENTAS) {
+      // painel só de ferramentas (editor de imagem, em cima do completo): só o que ESTE painel mudou vai
+      // para o arquivo, por cima do que está lá (não desfaz o que o painel de baixo gravou)
+      var disco = lerJSONArquivo(arquivoConfig()) || {}, base = cfgCarregado || {}, kk;
+      for (kk in cfg) { if (Object.prototype.hasOwnProperty.call(cfg, kk) && JSON.stringify(cfg[kk]) !== JSON.stringify(base[kk])) { disco[kk] = cfg[kk]; } }
+      gravar = disco;
+      cfgCarregado = JSON.parse(JSON.stringify(cfg));
+    }
+    R('fs').writeFileSync(arquivoConfig(), JSON.stringify(gravar, null, 2), 'utf8');
   }
+  var cfgCarregado = null;
   function jsonSeguro(x) {
     return JSON.stringify(x).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   }
@@ -1042,6 +1052,12 @@
     delete env.ANTHROPIC_AUTH_TOKEN;
     env.ENABLE_TOOL_SEARCH = 'false';
     env.MCP_PROTOCOL_NEGOTIATION = 'legacy';
+    // 05/11/2026 (Claude Code novo): com alwaysLoad a partida só esperava ~5 s pelas ferramentas do Arcano
+    // (MCP_CONNECT_TIMEOUT_MS); no programa de PC/navegador a conexão passa pelo conector e pelo painel e às
+    // vezes demora mais: "não conectou às ferramentas (status failed)". Espera até 30 s (variáveis da doc do Claude Code).
+    if (!env.MCP_CONNECT_TIMEOUT_MS) { env.MCP_CONNECT_TIMEOUT_MS = '30000'; }
+    if (!env.MCP_TIMEOUT) { env.MCP_TIMEOUT = '60000'; }
+    if (!env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS) { env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS = '30000'; }
     // 05/11/2026: variável de certificado apontando para arquivo que não existe (ex.: SSL_CERT_FILE deixado por um
     // programa desinstalado, como o Cinema 4D) faz o Codex falhar em toda conexão ("Failed to read CA certificate
     // file ... selected by SSL_CERT_FILE"). Arquivo inexistente = tira a variável e usa os certificados do sistema.
@@ -1272,7 +1288,7 @@
       if (esf) { args.push('--effort', esf); }
       if (opcoes.somenteLeitura) { args.push('--disallowedTools'); FERRAMENTAS_ESCRITA.forEach(function (n) { args.push('mcp__arcano__' + n); }); }
 
-      var filho, buffer = '', erroTxt = '', terminou = false, usouResume = !!sessaoClaude;
+      var filho, buffer = '', erroTxt = '', terminou = false, usouResume = !!sessaoClaude, sessaoAntes = sessaoClaude;
       function fim(r) {
         if (terminou) { return; } terminou = true; processoClaude = null;
         // sessão antiga não existe mais (conversa restaurada de outro dia): segue sem ela, levando o resumo da tela
@@ -1288,6 +1304,7 @@
       processoClaude = filho;
 
       function linha(l) {
+        if (terminou) { return; }
         l = l.trim();
         if (!l) { return; }
         var e;
@@ -1301,6 +1318,15 @@
           if (e.model && ev.modelo) { ev.modelo(e.model); }
           var servidores = e.mcp_servers || [], conectado = false;
           for (var i = 0; i < servidores.length; i++) { if (servidores[i].name === 'arcano' && servidores[i].status === 'connected') { conectado = true; } }
+          if (!conectado && !opcoes.mcpDeNovo) {
+            // sem as ferramentas a IA não faz nada no editor: fecha este e tenta mais uma vez sozinho
+            terminou = true; processoClaude = null; sessaoClaude = sessaoAntes;
+            try { filho.kill(); } catch (eK) {}
+            var o3 = {}, k3; for (k3 in opcoes) { if (Object.prototype.hasOwnProperty.call(opcoes, k3)) { o3[k3] = opcoes[k3]; } } o3.mcpDeNovo = true;
+            if (ev.tentativa) { ev.tentativa('Conectando as ferramentas de novo...'); }
+            setTimeout(function () { rodarClaudeCode(caminho, pedido, ev, o3); }, 1500);
+            return;
+          }
           if (!conectado) { ev.aviso('O Claude Code não conectou às ferramentas do After (' + JSON.stringify(servidores) + ').'); }
         } else if (e.type === 'system' && e.subtype === 'api_retry') {
           ev.tentativa('Instabilidade na Anthropic, tentando de novo (' + e.attempt + '/' + e.max_retries + ')...');
@@ -2635,6 +2661,8 @@
 
   function enviar(texto, visivel, classeExtra, opcoes) {
     opcoes = opcoes || {};
+    // painel só de ferramentas (em cima): o chat é o de baixo
+    if (window.ARCANO_SO_FERRAMENTAS) { mostrarToast('O chat com a IA fica no painel de baixo.'); return; }
     texto = String(texto || '').replace(/^\s+|\s+$/g, '');
     if (!texto && anexosChat.length && !opcoes.doAnexos) { texto = 'Enviei estes arquivos para usar no projeto.'; }
     if (ocupado || atualizandoCC || !texto) { return; }
@@ -7095,6 +7123,7 @@
     try { iniciarUso(); } catch (eUs) {}
     if (!node) { esconderSplash(); mostrarTela('tela-erro'); return; }
     cfg = lerConfig();
+    try { cfgCarregado = JSON.parse(JSON.stringify(cfg)); } catch (eCc) { cfgCarregado = null; }
     if (!cfg.idioma && window.__arcanoIdioma) { cfg.idioma = window.__arcanoIdioma; }   // testes automáticos
     if (ehMac()) { adaptarTextosMac(); }
     if (ehPS()) { adaptarTelaPS(); }
@@ -8592,6 +8621,7 @@
     return t + '\nNo fim, me diga em poucas linhas o que ajustou' + (j.textos ? ', quais fontes usou e o que não deu para recriar' : '') + '.';
   }
   function pedirTextosEditaveis(j) {
+    if (window.ARCANO_SO_FERRAMENTAS) { mostrarToast('Separado! Para a IA conferir a montagem, peça no chat do painel de baixo.'); return; }
     var msg = promptTextosEditaveis(j);
     if (ocupado) { mostrarToast('Separado! Quando a IA do Chat terminar o que está fazendo, peça para ela revisar a montagem.', false); j.textosPendente = true; salvarSepJobs(); return; }
     if (!cfg.modo) { mostrarToast('Separado! Para a IA conferir a montagem, escolha um motor de IA na aba Conta.', true); return; }
@@ -11610,6 +11640,183 @@
       conversor: new URL('web/aep/aep_jsx.py?v=' + VERSAO, location.href).href,
     }, [item.bytes.buffer]);
   }
+  // ---------- Arquivo > Salvar como projeto do After (.aep) (editor de vídeo, navegador e PC) ----------
+  // Este script roda DENTRO do editor (modelo do After) e devolve o projeto em JSON: itens, camadas e as
+  // propriedades mexidas (por matchName), com keyframes, suavização e expressões. O gravador (aep_jsx.py,
+  // py-aep no Pyodide) monta o .aep a partir dele. Também roda igual no After de verdade.
+  function lerProjetoParaAep() {
+    var avisos = [];
+    function nomeEnum(E, v) { for (var k in E) { if (k.charAt(0) !== '_' && E[k] === v) { return k; } } return null; }
+    function num(x) { return typeof x === 'number' && isFinite(x) ? Math.round(x * 100000) / 100000 : x; }
+    function arr(v) { if (v instanceof Array) { var o = []; for (var i = 0; i < v.length; i++) { o.push(num(v[i])); } return o; } return num(v); }
+    function valor(p, v) {
+      var t = p.propertyValueType;
+      if (t === PropertyValueType.SHAPE) {
+        return { forma: { v: v.vertices, i: v.inTangents, o: v.outTangents, c: !!v.closed } };
+      }
+      if (t === PropertyValueType.TEXT_DOCUMENT) {
+        var d = { t: String(v.text) };
+        try { d.fonte = v.font; d.tam = v.fontSize; d.cor = v.fillColor; d.preenche = v.applyFill; d.contorno = v.strokeColor; d.contornar = v.applyStroke; d.largura = v.strokeWidth; d.espaco = v.tracking; } catch (e) {}
+        try { if (!v.autoLeading) { d.entrelinha = v.leading; } } catch (e) {}
+        try { d.just = nomeEnum(ParagraphJustification, v.justification); } catch (e) {}
+        return { texto: d };
+      }
+      return arr(v);
+    }
+    function folha(p) {
+      var t = p.propertyValueType;
+      if (t === PropertyValueType.NO_VALUE || t === PropertyValueType.CUSTOM_VALUE || t === PropertyValueType.MARKER ||
+          t === PropertyValueType.LAYER_INDEX || t === PropertyValueType.MASK_INDEX) { return null; }
+      var nk = 0, expr = '';
+      try { nk = p.numKeys; } catch (e) {}
+      try { if (p.canSetExpression && p.expression) { expr = p.expression; } } catch (e) {}
+      var mexida = false;
+      try { mexida = p.isModified; } catch (e) { mexida = true; }
+      if (!mexida && !nk && !expr) { return null; }
+      var o = { mn: p.matchName, nome: p.name };
+      try { if (p.dimensionsSeparated) { o.separado = true; } } catch (e) {}
+      if (expr) { o.e = expr; try { if (!p.expressionEnabled) { o.eoff = true; } } catch (e) {} }
+      if (nk) {
+        o.k = [];
+        for (var i = 1; i <= nk; i++) {
+          var k = { t: num(p.keyTime(i)), v: valor(p, p.keyValue(i)) };
+          try { k.ii = nomeEnum(KeyframeInterpolationType, p.keyInInterpolationType(i)); k.oi = nomeEnum(KeyframeInterpolationType, p.keyOutInterpolationType(i)); } catch (e) {}
+          try {
+            var ie = p.keyInTemporalEase(i), oe = p.keyOutTemporalEase(i), a = [], b = [];
+            for (var j = 0; j < ie.length; j++) { a.push([num(ie[j].speed), num(ie[j].influence)]); }
+            for (j = 0; j < oe.length; j++) { b.push([num(oe[j].speed), num(oe[j].influence)]); }
+            k.ie = a; k.oe = b;
+          } catch (e) {}
+          o.k.push(k);
+        }
+      } else {
+        try { o.v = valor(p, p.value); } catch (e) { return null; }
+      }
+      return o;
+    }
+    var FORA = { 'ADBE Marker': 1, 'ADBE MTrackers': 1, 'ADBE Layer Overrides': 1, 'ADBE Layer Sets': 1, 'ADBE Source Options Group': 1, 'ADBE Data Group': 1 };
+    function grupo(g, dentroDeIndexado) {
+      var out = [];
+      for (var i = 1; i <= g.numProperties; i++) {
+        var p = null;
+        try { p = g.property(i); } catch (e) { p = null; }
+        if (!p || FORA[p.matchName]) { continue; }
+        if (p.matchName === 'ADBE Layer Styles') { try { if (p.enabled && p.numProperties > 1) { avisos.push('estilo de camada'); } } catch (e) {} continue; }
+        if (p.propertyType === PropertyType.PROPERTY) { var f = folha(p); if (f) { out.push(f); } continue; }
+        var indexado = p.propertyType === PropertyType.INDEXED_GROUP;
+        var filhos = grupo(p, indexado);
+        if (!filhos.length && !indexado && !dentroDeIndexado) { continue; }
+        var o = { mn: p.matchName, nome: p.name, g: filhos };
+        if (indexado) { o.i = true; }
+        if (dentroDeIndexado) {
+          try { if (!p.enabled) { o.desligado = true; } } catch (e) {}
+          try { if (p.maskMode !== undefined) { o.modo = nomeEnum(MaskMode, p.maskMode); o.inverter = !!p.inverted; } } catch (e) {}
+        }
+        out.push(o);
+      }
+      return out;
+    }
+    function marcadores(mp) {
+      var out = [];
+      try {
+        for (var i = 1; i <= mp.numKeys; i++) {
+          var v = mp.keyValue(i), m = { t: num(mp.keyTime(i)), c: String(v.comment || '') };
+          try { if (v.duration) { m.d = num(v.duration); } if (v.chapter) { m.cap = String(v.chapter); } } catch (e) {}
+          out.push(m);
+        }
+      } catch (e) {}
+      return out;
+    }
+    function camadas(comp) {
+      var out = [];
+      for (var j = 1; j <= comp.numLayers; j++) {
+        var L = comp.layer(j), c = { idx: j, mn: L.matchName, nome: L.name, inP: num(L.inPoint), outP: num(L.outPoint), ini: num(L.startTime) };
+        try { c.ativa = L.enabled; c.solo = L.solo; c.trava = L.locked; c.shy = L.shy; } catch (e) {}
+        try { if (L.parent) { c.pai = L.parent.index; } } catch (e) {}
+        if (L.matchName === 'ADBE AV Layer' || L.matchName === 'ADBE Text Layer' || L.matchName === 'ADBE Vector Layer') {
+          try { c.td = L.threeDLayer; c.adj = L.adjustmentLayer; c.mb = L.motionBlur; c.guia = L.guideLayer; c.estica = num(L.stretch); } catch (e) {}
+          try { c.modo = nomeEnum(BlendingMode, L.blendingMode); } catch (e) {}
+          try { if (L.hasTrackMatte && L.trackMatteLayer) { c.mate = { idx: L.trackMatteLayer.index, tipo: nomeEnum(TrackMatteType, L.trackMatteType) }; } } catch (e) {}
+        }
+        if (L.matchName === 'ADBE AV Layer') {
+          try { c.nulo = L.nullLayer; c.colapso = L.collapseTransformation; c.audio = L.hasAudio ? L.audioEnabled : null; } catch (e) {}
+          try { if (L.source && !L.nullLayer) { c.fonte = L.source.id; } } catch (e) {}
+          try { if (L.timeRemapEnabled) { avisos.push('remapear tempo'); } } catch (e) {}
+        }
+        if (L.matchName === 'ADBE Text Layer') {
+          try { var td = L.property('ADBE Text Properties').property('ADBE Text Document').value; c.texto = String(td.text); if (td.boxText) { c.caixa = td.boxTextSize; } } catch (e) {}
+        }
+        c.props = grupo(L, false);
+        try { var mk = marcadores(L.property('ADBE Marker')); if (mk.length) { c.marcas = mk; } } catch (e) {}
+        out.push(c);
+      }
+      return out;
+    }
+    var pr = app.project, itens = [];
+    for (var i = 1; i <= pr.numItems; i++) {
+      var it = pr.item(i), d = { id: it.id, nome: it.name, pai: 0 };
+      try { if (it.parentFolder && it.parentFolder !== pr.rootFolder && it.parentFolder.id !== pr.rootFolder.id) { d.pai = it.parentFolder.id; } } catch (e) {}
+      if (it instanceof FolderItem) { d.tipo = 'pasta'; }
+      else if (it instanceof CompItem) {
+        d.tipo = 'comp'; d.w = it.width; d.h = it.height; d.pa = it.pixelAspect; d.dur = num(it.duration); d.fps = num(it.frameRate);
+        try { d.fundo = it.bgColor; } catch (e) {}
+        try { var mc = marcadores(it.markerProperty); if (mc.length) { d.marcas = mc; } } catch (e) {}
+        d.camadas = camadas(it);
+      } else if (it instanceof FootageItem) {
+        var s = it.mainSource, ehSolido = String(s).indexOf('Solid') >= 0, arq = null;
+        try { arq = s.file; } catch (e) { arq = null; }
+        d.w = it.width; d.h = it.height; d.pa = it.pixelAspect; d.dur = num(it.duration); d.fps = num(it.frameRate);
+        try { d.audio = it.hasAudio; } catch (e) {}
+        if (ehSolido) { d.tipo = 'solido'; try { d.cor = s.color; } catch (e) {} }
+        else if (arq) { d.tipo = 'arquivo'; d.arquivo = arq.fsName; try { d.still = !!s.isStill; } catch (e) {} }
+        else { d.tipo = 'reservado'; }
+      } else { continue; }
+      itens.push(d);
+    }
+    return JSON.stringify({ itens: itens, avisos: avisos });
+  }
+  var gravandoAep = false;
+  // pedido: { caminho (programa de PC: onde gravar, escolhido no editor), nome }
+  function salvarProjetoAfter(pedido) {
+    pedido = pedido || {};
+    var nome = String(pedido.nome || 'Projeto').replace(/\.(ecproj|aep)$/i, '') + '.aep';
+    if (gravandoAep) { mostrarToast('Já estou salvando um projeto do After. Espere terminar.', true); return; }
+    gravandoAep = true;
+    var fim = function (texto, erro) { gravandoAep = false; mostrarToast(texto, erro); try { console.log('[Arcano] salvar .aep:', texto); } catch (e) {} };
+    mostrarToast('Lendo o projeto para salvar como ' + nome + '...');
+    evalJSX('(' + lerProjetoParaAep.toString() + ')()', 5 * 60 * 1000, function (res) {
+      if (res === 'ERRO_TEMPO') { fim('O editor demorou demais para entregar o projeto.', true); return; }
+      var o = null; try { o = JSON.parse(res); } catch (e) { o = null; }
+      if (!o || !o.itens) { fim('Não consegui ler o projeto do editor: ' + String(res).slice(0, 300), true); return; }
+      var id = ++seqAep;
+      pedidosAep[id] = {
+        progresso: function (t) { mostrarToast(t); },
+        fim: function (r) {
+          if (!r.ok) { fim('Não consegui gravar o .aep: ' + r.erro, true); return; }
+          var avisos = (o.avisos || []).concat(r.avisos || []).filter(function (a, i, l) { return l.indexOf(a) === i; });
+          try { if (avisos.length) { console.warn('[Arcano] .aep, o que não foi:', avisos); } } catch (e) {}
+          var extra = avisos.length ? ' ' + avisos.length + ' item(ns) ficaram de fora (efeitos e estilos que o After só tem na instalação dele).' : '';
+          var bytes = r.bytes;
+          if (pedido.caminho && window.ipc && window.ipc.postMessage) {
+            // programa de PC: o programa grava no lugar escolhido (o conector só grava nas pastas do Arcano)
+            var bin = '', passo = 0x8000;
+            for (var i = 0; i < bytes.length; i += passo) { bin += String.fromCharCode.apply(null, bytes.subarray(i, i + passo)); }
+            window.ipc.postMessage(JSON.stringify({ tipo: 'aep-salvo', caminho: String(pedido.caminho), dados: btoa(bin) }));
+            fim('Projeto do After salvo em ' + pedido.caminho + '.' + extra, avisos.length > 0);
+            return;
+          }
+          // navegador: o editor baixa o arquivo (Downloads)
+          window.parent.postMessage({ arcano: 'aep-baixar', nome: nome, bytes: bytes }, location.origin);
+          fim('Projeto do After ' + nome + ' baixado (pasta Downloads).' + extra, avisos.length > 0);
+        },
+      };
+      leitorAep().postMessage({
+        id: id, acao: 'gravar', dados: JSON.stringify(o), windows: ehWindows(), pyodide: PYODIDE_BASE,
+        rodas: new URL('../painel/aep/', location.href).href,
+        conversor: new URL('web/aep/aep_jsx.py?v=' + VERSAO, location.href).href,
+      });
+    });
+  }
   // Entrada: navegador (o editor manda os bytes pelo montar.js) e programa de PC (o programa copia o
   // arquivo para a pasta temporária "arcano-aep" e avisa pelo WebView).
   var aepLigado = false;
@@ -11617,11 +11824,14 @@
     if (aepLigado || !window.ARCANO_NAVEGADOR || ehPS()) { return; }
     aepLigado = true;
     window.addEventListener('message', function (e) {
-      if (e.source !== window.parent || e.origin !== location.origin || !e.data || e.data.arcano !== 'aep') { return; }
+      if (e.source !== window.parent || e.origin !== location.origin || !e.data) { return; }
+      if (e.data.arcano === 'salvar-aep') { salvarProjetoAfter({ nome: e.data.nome }); return; }
+      if (e.data.arcano !== 'aep') { return; }
       abrirProjetoAfter(e.data.bytes, e.data.nome);
     });
     var anterior = window.arcanoBarra;
     window.arcanoBarra = function (p) {
+      if (p && p.tipo === 'salvar-aep') { salvarProjetoAfter(p); return; }
       if (p && p.tipo === 'aep') {
         var b = null;
         try { b = fs.readFileSync(String(p.caminho)); } catch (x) { mostrarToast('Não consegui ler o projeto do After: ' + x.message, true); return; }

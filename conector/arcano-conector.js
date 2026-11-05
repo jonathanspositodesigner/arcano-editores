@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const VERSAO = '0.4.2';
+const VERSAO = '0.4.3';
 const PORTAS = [47821, 47822, 47823, 47824, 47825];
 const ORIGENS = [
   'https://layers.voxvisual.com.br',
@@ -61,6 +61,12 @@ function ambienteLimpo() {
   delete env.ANTHROPIC_AUTH_TOKEN;
   env.ENABLE_TOOL_SEARCH = 'false';
   env.MCP_PROTOCOL_NEGOTIATION = 'legacy';
+    // 05/11/2026 (Claude Code novo): com alwaysLoad a partida só esperava ~5 s pelas ferramentas do Arcano
+    // (MCP_CONNECT_TIMEOUT_MS); no programa de PC/navegador a conexão passa pelo conector e pelo painel e às
+    // vezes demora mais: "não conectou às ferramentas (status failed)". Espera até 30 s (variáveis da doc do Claude Code).
+    if (!env.MCP_CONNECT_TIMEOUT_MS) env.MCP_CONNECT_TIMEOUT_MS = '30000';
+    if (!env.MCP_TIMEOUT) env.MCP_TIMEOUT = '60000';
+    if (!env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS) env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS = '30000';
   if (!WIN) {
     const atuais = String(env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin').split(':');
     for (const d of [os.homedir() + '/.local/bin', '/opt/homebrew/bin', '/usr/local/bin']) if (!atuais.includes(d)) atuais.push(d);

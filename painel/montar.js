@@ -100,10 +100,28 @@
         try { painel.contentWindow.postMessage({ arcano: 'aep', nome: nome, bytes: b }, location.origin, b ? [b.buffer] : []); } catch (e) { /* sem painel */ }
       });
     }
+    // Arquivo > Salvar como projeto do After (.aep): o painel monta o .aep e devolve para baixar
+    if (typeof m.arcanoAepSalvar === 'function') {
+      var sal = []; try { sal = JSON.parse(m.arcanoAepSalvar()) || []; } catch (e) { sal = []; }
+      sal.forEach(function (p) {
+        try { painel.contentWindow.postMessage({ arcano: 'salvar-aep', nome: p.nome || 'Projeto' }, location.origin); } catch (e) { /* sem painel */ }
+      });
+    }
   }, 300);
   window.addEventListener('message', function (ev) {
     if (ev.source !== painel.contentWindow) { return; }
     var d = ev.data || {};
+    // o .aep pronto (Salvar como projeto do After): baixa
+    if (d.arcano === 'aep-baixar' && d.bytes) {
+      try {
+        var url = URL.createObjectURL(new Blob([d.bytes], { type: 'application/octet-stream' }));
+        var a = document.createElement('a');
+        a.href = url; a.download = String(d.nome || 'Projeto.aep');
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+      } catch (e) { /* o painel avisa */ }
+      return;
+    }
     if (d.arcano === 'fontes-resposta') {
       var m = window.effectcraft && window.effectcraft.arcano;
       if (m) { try { m.arcanoFontesResposta(d.id, (d.fontes || []).map(function (f) { return f.dados; }).filter(function (b) { return b instanceof Uint8Array; })); } catch (e) { /* o editor importa sozinho depois */ } }

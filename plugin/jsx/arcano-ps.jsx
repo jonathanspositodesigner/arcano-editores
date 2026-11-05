@@ -1,4 +1,4 @@
-﻿/* Arcano Design 1.2.35 - biblioteca ExtendScript do PHOTOSHOP (o painel do After usa jsx/arcano.jsx).
+﻿/* Arcano Design 1.2.36 - biblioteca ExtendScript do PHOTOSHOP (o painel do After usa jsx/arcano.jsx).
    ES3 de propósito (motor de script do Photoshop 2020 a 2026). Tudo fica em $.global.__am.
    Mesmos nomes do After onde o painel compartilha o fluxo (IA de imagem, anexos, internet, diagnóstico):
    camadaIA, camadaIAAlvo, exportarImagemIA, importarImagemIA, importarWeb, projetoAtual, projectInfo,
@@ -7,7 +7,7 @@
    Cada chamada roda com réguas em PIXELS, texto em PONTOS e sem diálogos; tudo volta como estava no fim. */
 (function () {
   var am = {};
-  am.v = '1.2.35';
+  am.v = '1.2.36';
 
   function cTID(s) { return charIDToTypeID(s); }
   function sTID(s) { return stringIDToTypeID(s); }

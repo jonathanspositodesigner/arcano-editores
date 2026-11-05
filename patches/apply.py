@@ -316,6 +316,7 @@ pub(crate) const GATE: &str =""")
     fontes_pc(r)
     projeto_after(r)
     carregando(r)
+    salvar_aep(r)
     tempo_real(r)
     render_simples(r)
     render_gpu_propria(r)
@@ -520,6 +521,38 @@ def carregando(r):
           '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {',
           '    if !media.is_empty() && effectcraft_ui_egui::arcano_carregando::adiar("file.import", &json!({"paths": media.clone()})) {\n        return;\n    }\n'
           '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {')
+
+
+def salvar_aep(r):
+    """Arquivo ▸ Salvar como projeto do After (.aep) (navegador e PC): o editor guarda o pedido; o painel
+    do Arcano Motion lê o projeto (script no modelo do After) e grava o .aep com o py-aep. PC: a pessoa
+    escolhe onde salvar aqui e o programa grava o que o painel devolve; navegador: vai para os Downloads."""
+    troca(r, "crates/engine/src/menus.rs", "    Save a Copy As XML... | file.saveCopyAsXml\n",
+          "    Save a Copy As XML... | file.saveCopyAsXml\n  Salvar como projeto do After (.aep)... | arcano.salvarAep\n")
+    troca(r, "crates/ui-egui/src/menus/entries.rs", '    if e.command == "window.panel" {\n',
+          '    if e.command == "arcano.salvarAep" {\n        return true;\n    }\n    if e.command == "window.panel" {\n')
+    troca(r, "crates/ui-egui/src/menus/invoke.rs", "    if crate::arcano_carregando::adiar(id, &params) {\n",
+          "    if id == \"arcano.salvarAep\" {\n"
+          "        let caminho_atual = app.session.path.clone();\n"
+          "        let nome = caminho_atual.as_deref().and_then(|p| std::path::Path::new(p).file_stem().map(|s| s.to_string_lossy().to_string())).unwrap_or_else(|| \"Projeto\".into());\n"
+          "        let mut pedido = serde_json::json!({\"tipo\": \"salvar-aep\", \"nome\": nome});\n"
+          "        if !cfg!(target_arch = \"wasm32\") {\n"
+          "            let padrao = caminho_atual.as_deref().map(|p| std::path::Path::new(p).with_extension(\"aep\").to_string_lossy().to_string()).unwrap_or_else(|| format!(\"{nome}.aep\"));\n"
+          "            match app.hooks.save_dialog(&padrao) {\n"
+          "                Some(Some(c)) => {\n"
+          "                    let c = if c.to_ascii_lowercase().ends_with(\".aep\") { c } else { format!(\"{c}.aep\") };\n"
+          "                    pedido[\"caminho\"] = serde_json::json!(c);\n"
+          "                }\n"
+          "                Some(None) => return Ok(Value::Null),\n"
+          "                None => {}\n"
+          "            }\n"
+          "        }\n"
+          "        effectcraft_engine::arcano_aep::pedir_salvar(pedido.to_string());\n"
+          "        app.session.toast(\"Salvando como projeto do After pelo painel do Arcano Motion…\");\n"
+          "        ctx.request_repaint();\n"
+          "        return Ok(Value::Null);\n"
+          "    }\n"
+          "    if crate::arcano_carregando::adiar(id, &params) {\n")
 
 
 def projeto_after(r):
@@ -888,7 +921,7 @@ def painel_pc_video(r):
     troca(r, m, "    /// The first frame was drawn (logged once).\n    drawn: bool,\n}",
           "    /// The first frame was drawn (logged once).\n    drawn: bool,\n    /// O painel do Arcano Motion dentro da janela.\n    painel: painel_arcano::Painel,\n    /// Atualização pelo próprio programa.\n    atualizador: atualizador_arcano::Atualizador,\n}")
     troca(r, m, "                launch,\n                drawn: false,\n            }))",
-          "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\"),\n                atualizador: atualizador_arcano::Atualizador::new(\"video\"),\n            }))")
+          "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\").com_receber(painel_arcano::receber_video),\n                atualizador: atualizador_arcano::Atualizador::new(\"video\"),\n            }))")
     # fechar o programa: solta o painel e garante que o processo termina
     troca(r, m, "        let _ = self.app.session.execute(\"file.runShutdownScripts\", json!({}));\n",
           "        let _ = self.app.session.execute(\"file.runShutdownScripts\", json!({}));\n        self.painel.sair();\n")
@@ -902,6 +935,13 @@ def painel_pc_video(r):
           "                None => self.app.ui.status = format!(\"Não consegui abrir o projeto do After {aep}\"),\n"
           "            }\n"
           "        }\n"
+          "        // Arquivo > Salvar como projeto do After: o painel monta o .aep e devolve (painel_arcano::receber_video)\n"
+          "        for pedido in effectcraft_engine::arcano_aep::pedidos_salvar() {\n"
+          "            self.painel.mandar(&pedido);\n"
+          "        }\n"
+          "        for aviso in painel_arcano::avisos() {\n"
+          "            self.app.session.toast(aviso);\n"
+          "        }\n"
           "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n"
           "        self.atualizador.quadro(ui.ctx(), \"Arcano Layers Vídeo\", effectcraft_ui_egui::ARCANO_CONFERIR_ATUALIZACAO.swap(false, std::sync::atomic::Ordering::Relaxed));\n")
     p = pathlib.Path(r) / "apps/effectcraft/Cargo.toml"
@@ -912,6 +952,8 @@ def painel_pc_video(r):
     troca(r, "crates/ui-egui/src/panels.rs", "        PanelKind::VrCompEditor => path_vr_panels::vr_editor(app, ui, rect),",
           "        PanelKind::VrCompEditor => {\n            let _ = &app;\n            crate::arcano_painel::reservar(ui, rect)\n        }")
     troca(r, "crates/ui-egui/src/dock.rs", '            PanelKind::VrCompEditor => "VR Comp Editor",', '            PanelKind::VrCompEditor => "Arcano Motion",')
+    # Janela ▸ Arcano Motion reabre a aba depois de fechada (o item existia com o nome antigo "VR Comp Editor")
+    troca(r, "crates/engine/src/menus.rs", '  VR Comp Editor | window.panel {"panel":"vrCompEditor"}\n', '  Arcano Motion | window.panel {"panel":"vrCompEditor"}\n')
     troca(r, "crates/ui-egui/src/dock.rs",
           "        _ => hsplit(\n            FixedSecond(300.0),\n            vsplit(\n                Ratio(0.56),\n                hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),\n                tabs(&[Timeline, RenderQueue], 0),\n            ),\n            vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),\n        ),",
           "        _ => hsplit(\n            FixedSecond(420.0),\n            vsplit(\n                Ratio(0.56),\n                hsplit(FixedFirst(300.0), tabs(&[Project, EffectControls], 0), tabs(&[Composition, Layer], 0)),\n                tabs(&[Timeline, RenderQueue], 0),\n            ),\n            vsplit(\n                Ratio(0.62),\n                tabs(&[VrCompEditor], 0),\n                vsplit(FixedFirst(PREVIEW_FRAME), tabs(&[Preview], 0), tabs(&[Properties, Align, Audio, EffectsPresets], 0)),\n            ),\n        ),")

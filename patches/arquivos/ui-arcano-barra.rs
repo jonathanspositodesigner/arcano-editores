@@ -344,8 +344,8 @@ pub fn barra(app: &mut PhotocraftApp, ctx: &egui::Context) {
     });
     let t = Tokens::get(ctx);
 
-    let largura = 392.0_f32.min(tela.width() - 16.0).max(240.0);
-    let altura = 38.0;
+    let largura = 420.0_f32.min(tela.width() - 16.0).max(260.0);
+    let altura = 42.0;
     let mut pos = pos2(caixa.center().x - largura / 2.0, caixa.bottom() + 12.0);
     if pos.y + altura > tela.bottom() - 8.0 {
         pos.y = (caixa.top() - altura - 12.0).max(tela.top() + 8.0);
@@ -368,13 +368,14 @@ pub fn barra(app: &mut PhotocraftApp, ctx: &egui::Context) {
             egui::Frame::new()
                 .fill(Color32::from_rgba_unmultiplied(20, 16, 26, 242))
                 .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(168, 85, 247, 150)))
-                .corner_radius(19.0)
-                .inner_margin(egui::Margin { left: 6, right: 6, top: 5, bottom: 5 })
+                .corner_radius(21.0)
+                .inner_margin(egui::Margin { left: 8, right: 7, top: 6, bottom: 6 })
                 .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: Color32::from_rgba_unmultiplied(124, 58, 237, 70) })
                 .show(ui, |ui| {
-                    ui.set_width(largura - 12.0);
+                    ui.set_width(largura - 15.0);
+                    ui.set_height(30.0);
                     ui.horizontal_centered(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
+                        ui.spacing_mut().item_spacing.x = 6.0;
                         // a alça: arrasta a barra
                         let (ra, alca) = ui.allocate_exact_size(vec2(12.0, 26.0), Sense::drag());
                         for (dx, dy) in [(-2.5, -5.0), (2.5, -5.0), (-2.5, 0.0), (2.5, 0.0), (-2.5, 5.0), (2.5, 5.0)] {
@@ -419,15 +420,24 @@ pub fn barra(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 }
                             }
                         }
-                        let botoes = 4.0 * 30.0;
+                        // o campo tem a altura dos botões e o texto no meio (antes ficava mais alto,
+                        // "torto", porque o campo era mais baixo e desenhava no topo)
+                        let botoes = 4.0 * 26.0 + 4.0 * 6.0 + 13.0;
                         let campo = (ui.available_width() - botoes).max(60.0);
                         let edit = ui.add(
                             egui::TextEdit::singleline(&mut bar.texto)
-                                .hint_text("O que mudar nesta camada?")
+                                .hint_text(RichText::new("O que mudar nesta camada?").size(13.5).color(Color32::from_gray(130)))
+                                .font(egui::FontId::proportional(13.5))
                                 .desired_width(campo)
+                                .min_size(vec2(campo, 28.0))
+                                .align(egui::Align2::LEFT_CENTER)
+                                .margin(egui::Margin::symmetric(4, 0))
                                 .frame(egui::Frame::NONE)
                                 .text_color(Color32::WHITE),
                         );
+                        // divisor fino entre o pedido e os botões
+                        let (rd, _) = ui.allocate_exact_size(vec2(1.0, 18.0), Sense::hover());
+                        ui.painter().rect_filled(rd, 0.0, Color32::from_rgba_unmultiplied(255, 255, 255, 28));
                         if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !bar.texto.trim().is_empty() {
                             acao = Some("alterar");
                         }

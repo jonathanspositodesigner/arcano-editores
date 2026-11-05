@@ -24,3 +24,16 @@ pub fn pedir(caminhos: &[String]) {
 pub fn pendentes() -> Vec<String> {
     std::mem::take(&mut *FILA.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
 }
+
+/// Arquivo ▸ Salvar como projeto do After (.aep): pedidos ao painel (JSON {tipo, nome, caminho?}).
+static SALVAR: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Guarda um pedido de salvar como .aep para o painel.
+pub fn pedir_salvar(pedido: String) {
+    SALVAR.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(pedido);
+}
+
+/// Os pedidos de salvar como .aep que esperam o painel (e esvazia a fila).
+pub fn pedidos_salvar() -> Vec<String> {
+    std::mem::take(&mut *SALVAR.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}

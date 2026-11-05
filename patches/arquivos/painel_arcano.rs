@@ -518,3 +518,69 @@ pub fn aep_para_painel(caminho: &str) -> Option<String> {
     std::fs::copy(origem, &destino).ok()?;
     Some(serde_json::json!({"tipo": "aep", "caminho": destino.to_string_lossy(), "nome": nome}).to_string())
 }
+
+/// Avisos para o editor mostrar (toast), vindos dos recados do painel.
+static AVISOS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Os avisos que chegaram (e esvazia).
+#[allow(dead_code)]
+pub fn avisos() -> Vec<String> {
+    std::mem::take(&mut *AVISOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
+fn avisar(t: String) {
+    AVISOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(t);
+}
+
+/// base64 padrão (o .aep vem do painel assim pelo `window.ipc.postMessage`).
+fn de_base64(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut buf, mut bits) = (0u32, 0u32);
+    for c in s.bytes() {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' | b'\n' | b'\r' | b' ' => continue,
+            _ => return None,
+        };
+        buf = (buf << 6) | u32::from(v);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Recados do painel para o programa de vídeo: "Salvar como projeto do After" pronto ({tipo:
+/// "aep-salvo", caminho, dados (base64)}): o programa grava no lugar que a pessoa escolheu (o conector
+/// só grava nas pastas do Arcano).
+#[allow(dead_code)]
+pub fn receber_video(texto: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(texto) else { return };
+    if v.get("tipo").and_then(|t| t.as_str()) != Some("aep-salvo") {
+        return;
+    }
+    let caminho = v.get("caminho").and_then(|c| c.as_str()).unwrap_or("");
+    let ok = !caminho.is_empty() && caminho.to_ascii_lowercase().ends_with(".aep");
+    match (ok, v.get("dados").and_then(|d| d.as_str()).and_then(de_base64)) {
+        (true, Some(b)) if !b.is_empty() => match std::fs::write(caminho, &b) {
+            Ok(()) => avisar(format!("Projeto do After salvo em {caminho}")),
+            Err(e) => avisar(format!("Não consegui salvar o projeto do After em {caminho}: {e}")),
+        },
+        _ => avisar("Não consegui salvar o projeto do After (o painel mandou um arquivo inválido)".into()),
+    }
+}
+
+impl Painel {
+    /// O mesmo painel, com quem trata os recados dele.
+    #[allow(dead_code)]
+    pub fn com_receber(mut self, f: fn(&str)) -> Self {
+        self.ao_receber = Some(f);
+        self
+    }
+}
