@@ -556,10 +556,15 @@ def desktop(app, raiz):
     if app == "effectcraft":
         icones.gerar("video", pathlib.Path(raiz) / "assets/app-icon", "effectcraft", "ai.storyteller.effectcraft")
         painel_pc_video(raiz)
+        # Sem o atualizador do programa original (baixaria a versão deles, com o nome deles): quem atualiza somos nós.
+        troca(raiz, "apps/effectcraft/src/main.rs", "            app.set_startup_update_check(true);", "            app.set_startup_update_check(false);")
+        troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null", "            let _ = &app;\n            Value::Null")
         nomes_restantes(raiz, pastas=("apps/effectcraft/src",), nomes=nomes)
     else:
         icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
         painel_pc_imagem(raiz)
+        # Sem o atualizador do programa original (quem atualiza somos nós).
+        troca(raiz, "apps/photocraft/src/services.rs", "        check_updates: Some(crate::updates::service()),", "        check_updates: None,")
         nomes_restantes(raiz, pastas=("apps/photocraft/src",), nomes=nomes)
 
 

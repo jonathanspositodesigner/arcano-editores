@@ -10,7 +10,7 @@ AQUI = pathlib.Path(__file__).parent / "assets" / "fontes"
 
 def fonte(app):
     if app == "video":
-        return Image.open(AQUI / "arcano-motion.png").convert("RGBA"), True   # logo transparente: vai num quadrado escuro
+        return Image.open(AQUI / "arcano-motion.png").convert("RGBA"), True   # logo transparente: vai num quadrado branco
     return Image.open(AQUI / "arcanoapp-1080.png").convert("RGBA"), False  # já tem fundo claro
 
 
@@ -20,11 +20,7 @@ def ladrilho(app, tam, margem=0.0):
     corpo = round(tam * (1 - 2 * margem))
     tile = Image.new("RGBA", (corpo, corpo), (0, 0, 0, 0))
     if transparente:
-        fundo = Image.new("RGBA", (corpo, corpo))
-        d = ImageDraw.Draw(fundo)
-        for y in range(corpo):  # degradê roxo escuro do ArcanoApp
-            t = y / max(1, corpo - 1)
-            d.line([(0, y), (corpo, y)], fill=(int(52 + (24 - 52) * t), int(26 + (16 - 26) * t), int(88 + (36 - 88) * t), 255))
+        fundo = Image.new("RGBA", (corpo, corpo), (255, 255, 255, 255))  # fundo branco (pedido do dono)
         lg = logo.resize((round(corpo * 0.92),) * 2, Image.LANCZOS)
         fundo.alpha_composite(lg, ((corpo - lg.width) // 2, (corpo - lg.height) // 2))
     else:
