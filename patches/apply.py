@@ -318,6 +318,7 @@ pub(crate) const GATE: &str =""")
     carregando(r)
     tempo_real(r)
     render_simples(r)
+    render_gpu_propria(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
           "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
@@ -434,6 +435,32 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
     # Nome deles em qualquer texto que sobrou (menus, mensagens, tutoriais, traduções).
     nomes_restantes(r, pastas=("crates/ui-egui", "crates/engine", "crates/effects", "crates/script", "crates/export", "crates/lottie", "apps/effectcraft-web"),
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
+
+
+def render_gpu_propria(r):
+    """Render da fila no PC com um dispositivo de GPU só dele (pedido do dono: "graphics device lost"
+    ao renderizar fechava o programa). Antes o render usava a mesma GPU da janela: se ela caía
+    (memória de vídeo cheia com PSD grande), o programa inteiro fechava. Agora, se a GPU do render
+    cair, o render segue no processador (o editor já fazia isso) e a janela continua aberta."""
+    rq = "crates/engine/src/render_queue.rs"
+    troca(r, rq, "/// Everything the worker needs, detached from the session.\nstruct Work {",
+          "/// Arcano: GPU só do render da fila (programa de PC); sem ela, a da janela.\n"
+          "pub static ACCEL_EXPORTACAO: std::sync::Mutex<Option<Arc<dyn effectcraft_render::Accelerator>>> = std::sync::Mutex::new(None);\n\n"
+          "/// Everything the worker needs, detached from the session.\nstruct Work {")
+    troca(r, rq, "        accel: s.accel.clone(),\n        exporter,\n",
+          "        accel: ACCEL_EXPORTACAO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().or_else(|| s.accel.clone()),\n        exporter,\n")
+    troca(r, "crates/ui-egui/src/app/gpu.rs",
+          "                self.session.accel = Some(Arc::new(g.clone()));\n                self.gpu = Some(g);\n",
+          "                self.session.accel = Some(Arc::new(g.clone()));\n"
+          "                // Arcano: o render da fila ganha uma GPU só dele (se ela cair, a janela fica).\n"
+          "                #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "                std::thread::spawn(|| {\n"
+          "                    if let Some(e) = effectcraft_gpu::Gpu::headless() {\n"
+          "                        log::info!(\"Arcano: GPU própria do render pronta\");\n"
+          "                        *effectcraft_engine::render_queue::ACCEL_EXPORTACAO.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(e));\n"
+          "                    }\n"
+          "                });\n"
+          "                self.gpu = Some(g);\n")
 
 
 def render_simples(r):
