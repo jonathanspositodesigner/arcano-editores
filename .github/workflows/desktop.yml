@@ -94,7 +94,8 @@ jobs:
           python - <<PY
           import os
           d = {"NOME": os.environ["NOME"], "PASTA": os.environ["PASTA"], "EXE": os.environ["PASTA"] + ".exe",
-               "SAIDA": os.environ["ARQUIVO"] + "-Windows.exe", "VERSAO": "$V", "PAGINA": "https://arcanoapp.voxvisual.com.br"}
+               "SAIDA": os.environ["ARQUIVO"] + "-Windows.exe", "VERSAO": "$V", "PAGINA": "https://arcanoapp.voxvisual.com.br",
+               "BUILD": os.environ["GITHUB_RUN_NUMBER"]}
           with open("$ST/defs.nsh", "w", encoding="utf-8-sig") as f:
               for k, v in d.items():
                   f.write(f'!define {k} "{v}"\n')

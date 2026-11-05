@@ -64,12 +64,18 @@ Section "Instalar"
   Sleep 800
   SetOutPath "$INSTDIR"
   File "${EXE}"
-  File "app.ico"
+  ; Ícone com o número da versão no nome: o Windows guarda o ícone pelo caminho do arquivo, então
+  ; com o mesmo nome (app.ico) os atalhos continuavam com o ícone antigo depois de atualizar.
+  Delete "$INSTDIR\app.ico"
+  Delete "$INSTDIR\icone-*.ico"
+  File /oname=icone-${BUILD}.ico "app.ico"
   File /nonfatal "NOTICE"
-  ; Atalhos com o ícone do Arcano.
-  CreateShortcut "$DESKTOP\${NOME}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\app.ico"
+  ; Atalhos com o ícone do Arcano (apaga os velhos antes, para o Windows não reaproveitar o ícone guardado).
+  Delete "$DESKTOP\${NOME}.lnk"
+  Delete "$SMPROGRAMS\Arcano\${NOME}.lnk"
+  CreateShortcut "$DESKTOP\${NOME}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\icone-${BUILD}.ico"
   CreateDirectory "$SMPROGRAMS\Arcano"
-  CreateShortcut "$SMPROGRAMS\Arcano\${NOME}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\app.ico"
+  CreateShortcut "$SMPROGRAMS\Arcano\${NOME}.lnk" "$INSTDIR\${EXE}" "" "$INSTDIR\icone-${BUILD}.ico"
   ; Arcano Conector (o mesmo do instalador separado), ligado junto com o Windows.
   SetOutPath "${CONECTOR}"
   File "ArcanoConector.exe"
@@ -85,9 +91,12 @@ Section "Instalar"
   WriteRegStr HKCU "${DESINST}" "DisplayName" "${NOME}"
   WriteRegStr HKCU "${DESINST}" "DisplayVersion" "${VERSAO}"
   WriteRegStr HKCU "${DESINST}" "Publisher" "ArcanoApp"
-  WriteRegStr HKCU "${DESINST}" "DisplayIcon" "$INSTDIR\app.ico"
+  WriteRegStr HKCU "${DESINST}" "DisplayIcon" "$INSTDIR\icone-${BUILD}.ico"
   WriteRegStr HKCU "${DESINST}" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
   WriteRegDWORD HKCU "${DESINST}" "NoModify" 1
+  ; Avisa o Windows que os ícones mudaram (área de trabalho, menu Iniciar, barra de tarefas).
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0x1000, p 0, p 0)'
+  nsExec::Exec 'ie4uinit.exe -show'
 SectionEnd
 
 Section "Uninstall"
@@ -99,6 +108,7 @@ Section "Uninstall"
   DeleteRegKey HKCU "${DESINST}"
   Delete "$INSTDIR\${EXE}"
   Delete "$INSTDIR\app.ico"
+  Delete "$INSTDIR\icone-*.ico"
   Delete "$INSTDIR\NOTICE"
   Delete "$INSTDIR\Desinstalar.exe"
   RMDir "$INSTDIR"

@@ -542,12 +542,19 @@ def desktop(app, raiz):
         # Sem o atualizador do programa original (baixaria a versão deles, com o nome deles): quem atualiza somos nós.
         troca(raiz, "apps/effectcraft/src/main.rs", "            app.set_startup_update_check(true);", "            app.set_startup_update_check(false);")
         troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null", "            let _ = &app;\n            Value::Null")
+        # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
+        troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
+        troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')
         nomes_restantes(raiz, pastas=("apps/effectcraft/src",), nomes=nomes)
     else:
         icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
         painel_pc_imagem(raiz)
         # Sem o atualizador do programa original (quem atualiza somos nós).
         troca(raiz, "apps/photocraft/src/services.rs", "        check_updates: Some(crate::updates::service()),", "        check_updates: None,")
+        # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
+        troca(raiz, "apps/photocraft/build.rs", '.set("ProductName", "PhotoCraft")', f'.set("ProductName", "{NOME} Imagem")')
+        troca(raiz, "apps/photocraft/build.rs", '.set("FileDescription", "PhotoCraft image editor")', f'.set("FileDescription", "{NOME} Imagem")')
+        troca(raiz, "apps/photocraft/build.rs", '.set("CompanyName", "Learning Machines LLC")', '.set("CompanyName", "ArcanoApp")')
         nomes_restantes(raiz, pastas=("apps/photocraft/src",), nomes=nomes)
 
 

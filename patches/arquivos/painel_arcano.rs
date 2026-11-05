@@ -30,6 +30,8 @@ pub struct Painel {
     /// Endereço do conector (achado numa thread; `None` enquanto procura).
     conector: Arc<Mutex<Option<String>>>,
     procurando: bool,
+    /// Quando começou a procurar o conector (para avisar se demorar).
+    inicio: Option<Instant>,
     ultimo_lugar: Option<[i32; 4]>,
     visivel: bool,
     logado: bool,
@@ -47,6 +49,7 @@ impl Painel {
             _contexto: None,
             conector: Arc::new(Mutex::new(None)),
             procurando: false,
+            inicio: None,
             ultimo_lugar: None,
             visivel: false,
             logado: false,
@@ -86,6 +89,7 @@ impl Painel {
             return;
         }
         self.procurando = true;
+        self.inicio = Some(Instant::now());
         let alvo = self.conector.clone();
         std::thread::spawn(move || {
             let mut abriu = false;
@@ -158,7 +162,68 @@ impl Painel {
             }
         }
         #[cfg(not(any(windows, target_os = "macos")))]
-        let _ = (ctx, frame, lugar);
+        let _ = frame;
+        if let Some(r) = lugar {
+            self.estado(ctx, r);
+        }
+    }
+
+    /// Embaixo do painel (só aparece quando o painel não está por cima): o que está acontecendo,
+    /// o erro, se houver, e os botões "Tentar de novo" e "Abrir no navegador". Nunca fica parado
+    /// num "Abrindo…" sem explicação.
+    fn estado(&mut self, ctx: &egui::Context, r: egui::Rect) {
+        let nome = if self.app == "video" { "Arcano Motion" } else { "Arcano Design" };
+        let base = self.conector.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let demorou = base.is_none() && self.inicio.is_some_and(|t| t.elapsed() > Duration::from_secs(12));
+        let texto = match (&self.erro, &base) {
+            (Some(e), _) => format!(
+                "Não consegui abrir o painel do {nome} aqui dentro.\n\n{e}\n\nNo Windows, instale o Microsoft Edge WebView2 e abra o programa de novo. Enquanto isso, use \"Abrir no navegador\"."
+            ),
+            (None, None) if demorou => "O Arcano Conector não está respondendo.\nToque em \"Tentar de novo\". Se continuar, reinstale o programa (o conector vem junto).".to_owned(),
+            (None, None) => "Procurando o Arcano Conector…".to_owned(),
+            (None, Some(_)) => format!("Abrindo o painel do {nome}…\nSe ficar parado aqui, use \"Abrir no navegador\"."),
+        };
+        if self.erro.is_none() {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
+        let url = format!("{}/ui/plugin/index-web.html?pc={}", base.as_deref().unwrap_or("http://127.0.0.1:47821"), self.app);
+        let mostrar_tentar = self.erro.is_some() || demorou;
+        let mut tentar = false;
+        egui::Area::new(egui::Id::unique(if self.app == "video" { "arcano_painel_estado_video" } else { "arcano_painel_estado_imagem" }))
+            .order(egui::Order::Foreground)
+            .fixed_pos(r.min)
+            .show(ctx, |ui| {
+                ui.set_width(r.width());
+                ui.set_height(r.height());
+                ui.painter().rect_filled(r, 0.0, egui::Color32::from_rgb(20, 20, 22));
+                ui.add_space((r.height() * 0.3).min(160.0));
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width((r.width() - 32.0).max(120.0));
+                    ui.label(egui::RichText::new(texto).size(13.0).color(egui::Color32::from_gray(200)));
+                    ui.add_space(12.0);
+                    if mostrar_tentar && ui.button("Tentar de novo").clicked() {
+                        tentar = true;
+                    }
+                    ui.add_space(6.0);
+                    if ui.button("Abrir no navegador").clicked() {
+                        abrir_no_navegador(&url);
+                    }
+                });
+            });
+        if tentar {
+            self.erro = None;
+            self.ultimo_lugar = None;
+            self.visivel = false;
+            self.inicio = Some(Instant::now());
+            #[cfg(any(windows, target_os = "macos"))]
+            {
+                self.web = None;
+                self._contexto = None;
+            }
+            if base.is_none() {
+                abrir_conector();
+            }
+        }
     }
 
     #[cfg(any(windows, target_os = "macos"))]
@@ -193,6 +258,11 @@ impl Painel {
             }
             Err(e) => {
                 log::error!("painel do Arcano: {e}");
+                // fica anotado também na pasta do Arcano (ArcanoMotion/painel-<app>-erro.txt), fácil de achar
+                if let Some(p) = Self::pasta_comum() {
+                    let _ = std::fs::create_dir_all(&p);
+                    let _ = std::fs::write(p.join(format!("painel-{}-erro.txt", self.app)), format!("{e:?}\n{e}\n"));
+                }
                 self.erro = Some(format!("{e}"));
             }
         }
@@ -289,7 +359,9 @@ fn responde(porta: u16) -> bool {
         return false;
     };
     let _ = s.set_read_timeout(Some(Duration::from_millis(1500)));
-    if s.write_all(b"GET /status HTTP/1.0\r\nHost: 127.0.0.1\r\nOrigin: http://127.0.0.1\r\n\r\n").is_err() {
+    // o conector só aceita Host COM a porta (senão 403) e, sem Origin, responde na hora
+    // (com Origin ele ainda confere o Claude Code, que pode passar do tempo de espera)
+    if s.write_all(format!("GET /status HTTP/1.0\r\nHost: 127.0.0.1:{porta}\r\n\r\n").as_bytes()).is_err() {
         return false;
     }
     let mut r = String::new();
