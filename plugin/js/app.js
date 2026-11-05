@@ -7456,7 +7456,7 @@
     var scripts = [];
     html = html.replace(/<script src="([^"]+)"><\/script>\s*/g, function (m, s) { scripts.push(s); return ''; });
     var cab = '<script>window.ARCANO_WEB_VERSAO = ' + JSON.stringify(versao) + '; window.ARCANO_SCRIPTS = ' + JSON.stringify(scripts) + ';</script>\n' +
-      '<script src="web/buffer.js"></script>\n<script src="web/shim.js"></script>\n';
+      '<script src="web/buffer.js?v=' + encodeURIComponent(versao) + '"></script>\n<script src="web/shim.js?v=' + encodeURIComponent(versao) + '"></script>\n';
     var i = html.lastIndexOf('</body>');
     return i < 0 || !scripts.length ? null : html.slice(0, i) + cab + html.slice(i);
   }

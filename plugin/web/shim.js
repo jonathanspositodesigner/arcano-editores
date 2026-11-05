@@ -783,7 +783,8 @@
   function carregarScripts(lista, i) {
     if (i >= lista.length) { return; }
     var s = document.createElement('script');
-    s.src = lista[i];
+    // ?v=versão: arquivo novo a cada versão (o navegador não reaproveita o da versão anterior)
+    s.src = lista[i] + (window.ARCANO_WEB_VERSAO && lista[i].indexOf('?') < 0 ? '?v=' + encodeURIComponent(window.ARCANO_WEB_VERSAO) : '');
     s.onload = s.onerror = function () { carregarScripts(lista, i + 1); };
     document.body.appendChild(s);
   }
