@@ -271,6 +271,18 @@ pub fn abrir_no_navegador(url: &str) {
     }
 }
 
+/// A porta do canal do painel: a primeira livre a partir de `base` (no Windows, faixas de porta
+/// podem estar reservadas pelo sistema). Fica anotada em ArcanoMotion/controle-<app>.porta, onde o
+/// Arcano Conector procura.
+pub fn porta_livre(app: &str, base: u16) -> u16 {
+    let porta = (base..base.saturating_add(40)).find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok()).unwrap_or(base);
+    if let Some(pasta) = Painel::pasta_comum() {
+        let _ = std::fs::create_dir_all(&pasta);
+        let _ = std::fs::write(pasta.join(format!("controle-{app}.porta")), porta.to_string());
+    }
+    porta
+}
+
 fn responde(porta: u16) -> bool {
     use std::io::{Read, Write};
     let Ok(mut s) = std::net::TcpStream::connect_timeout(&std::net::SocketAddr::from(([127, 0, 0, 1], porta)), Duration::from_millis(400)) else {
@@ -282,7 +294,11 @@ fn responde(porta: u16) -> bool {
     }
     let mut r = String::new();
     let _ = s.take(8192).read_to_string(&mut r);
-    r.contains("arcano-conector")
+    // só o conector que serve o painel (0.4 ou mais novo); um antigo na porta não serve
+    let versao = r.split("\"versao\":\"").nth(1).and_then(|v| v.split('"').next()).unwrap_or("");
+    let mut partes = versao.split('.').map(|n| n.parse::<u32>().unwrap_or(0));
+    let (maior, menor) = (partes.next().unwrap_or(0), partes.next().unwrap_or(0));
+    r.contains("arcano-conector") && (maior > 0 || menor >= 4)
 }
 
 /// O Arcano Conector instalado junto (Windows: %LOCALAPPDATA%\ArcanoConector; Mac: Application Support/Arcano).

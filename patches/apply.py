@@ -416,7 +416,7 @@ def painel_pc_video(r):
     arq = pathlib.Path(__file__).parent / "arquivos"
     m = "apps/effectcraft/src/main.rs"
     troca(r, m, "            if let Some(port) = control_port {\n                disable_app_nap();",
-          "            if let Some(port) = control_port.or(Some(ARCANO_PORTA)) {\n                disable_app_nap();")
+          "            if let Some(port) = control_port.or_else(|| Some(painel_arcano::porta_livre(\"video\", ARCANO_PORTA))) {\n                disable_app_nap();")
     troca(r, m, "/// Driven by an agent (`--control`): don't activate the app on launch",
           "/// Canal do painel do Arcano Motion (o conector manda os scripts por aqui).\nconst ARCANO_PORTA: u16 = 47890;\n\n"
           "/// Driven by an agent (`--control`): don't activate the app on launch")
@@ -455,7 +455,7 @@ def painel_pc_imagem(r):
     m = "apps/photocraft/src/main.rs"
     troca(r, m, "    let control = control_setup(control_port, auth, &automation);",
           "    let (auth, automation) = arcano_controle(control_port, auth, automation);\n"
-          "    let control = control_setup(control_port.or(Some(ARCANO_PORTA)), auth, &automation);")
+          "    let control = control_setup(control_port.or_else(|| Some(painel_arcano::porta_livre(\"imagem\", ARCANO_PORTA))), auth, &automation);")
     troca(r, m, """        Err(error) => {
             eprintln!("photocraft: control server failed to bind 127.0.0.1:{port}: {error}");
             std::process::exit(2);

@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSAO = '1.2.30';
+  var VERSAO = '1.2.32';
   var VERSOES_MCP = ['2025-06-18', '2025-03-26', '2024-11-05'];
   var cep = window.__adobe_cep__;
 
@@ -269,6 +269,13 @@
   // =====================================================================
   // Ferramentas que o Claude usa (mesmas no modo assinatura e no modo API)
   // =====================================================================
+  // Economia de token (1.2.31, técnica do context-mode): saída grande de ferramenta fica guardada no PC e a IA
+  // recebe só o começo e o fim + um id; o resto ela busca com ler_saida (só o trecho que precisa).
+  var FERR_LER_SAIDA = {
+    name: 'ler_saida',
+    description: 'Lê uma SAÍDA GRANDE de ferramenta que foi guardada no PC para não encher a conversa (a ferramenta avisa com "saida_guardada: <id>"). Use "buscar" (texto ou nome de camada/comp/arquivo) para receber só as linhas que batem (com as vizinhas), ou "de"/"ate" (números de linha, 1 = primeira) para um trecho. Peça só o que precisa.',
+    inputSchema: { type: 'object', properties: { id: { type: 'string' }, buscar: { type: 'string' }, de: { type: 'number' }, ate: { type: 'number' } }, required: ['id'] }
+  };
   var FERRAMENTAS = [
     {
       name: 'ae_project_info',
@@ -447,6 +454,7 @@
       inputSchema: { type: 'object', properties: { job: { type: 'string' } }, required: ['job'] }
     }
   );
+  FERRAMENTAS.push(FERR_LER_SAIDA);
   var FERRAMENTAS_ESCRITA = ['ae_decompor_camadas', 'ae_sons_auto', 'ae_batidas', 'ae_run_jsx', 'biblioteca_usar', 'ae_ferramenta', 'ae_animar', 'ae_camera', 'ae_parallax', 'ia_gerar_video', 'ia_gerar_imagem', 'ia_gerar_narracao', 'ia_gerar_trilha', 'ae_trocar_midia', 'web_baixar', 'ia_baixar'];
 
   // ---------- Arcano Design (Photoshop): ferramentas próprias + as comuns (perguntas, anexos, internet, IA de imagem) ----------
@@ -534,6 +542,7 @@
       ferrComum('web_buscar'),
       textoPS(ferrComum('web_imagens'), []),
       ferrComum('web_ler'),
+      FERR_LER_SAIDA,
       {
         name: 'web_baixar',
         description: 'Baixa uma IMAGEM da internet para a pasta "Arcano Design/Web" ao lado do PSD (ou em Documentos). Com colocar true, também coloca como camada nova (Smart Object) no documento ativo, cabendo em 80% dele (depois ajuste com ps_run_jsx ou use ps_colocar_imagem com o arquivo para encaixar numa camada). Devolve o arquivo, largura e altura, e uma miniatura para você conferir se é a imagem certa. Use depois de web_imagens ou com um link que o usuário mandou. Parâmetros: url, nome (opcional, nome do arquivo), colocar (bool, padrão false).',
@@ -545,6 +554,7 @@
 
   var NOMES_AMIGAVEIS = {
     ae_project_info: 'Lendo o projeto',
+    ler_saida: 'Lendo um trecho guardado',
     ae_comp_info: 'Lendo a composição',
     ae_comp_tree: 'Mapeando a comp e as precomps',
     ae_run_jsx: 'Mexendo no After',
@@ -597,8 +607,10 @@
     function fim(r) {
       if (ui) { ui(r); }
       try { usoFerramenta(nome, args, r, Date.now() - t0Uso); } catch (eU) {}
+      try { r = encurtarSaida(nome, r); } catch (eS) {}
       cb(r);
     }
+    if (nome === 'ler_saida') { fim(lerSaidaGuardada(args)); return; }
     function deJSX(r) {
       if (r.ok) { fim({ texto: JSON.stringify(r.resultado) }); }
       else { fim({ erro: true, texto: 'ERRO: ' + r.erro + (r.linha ? ' (linha ' + r.linha + ')' : '') }); }
@@ -644,6 +656,50 @@
   }
 
   // Photoshop: as ferramentas ps_* e as versões Photoshop de ia_gerar_imagem. true = tratou
+  // ---- saídas grandes guardadas no PC (economia de token) ----
+  var SAIDA_ENCURTA = { biblioteca_listar: 1, ae_run_jsx: 1, ps_run_jsx: 1 };
+  var SAIDA_MAX = 6000, SAIDA_PONTA = 1800, SAIDA_LINHAS_MAX = 120, SAIDA_LINHA_MAX = 400;
+  function pastaSaidas() { return R('path').join(pastaConfig(), 'sessao', 'saidas'); }
+  function encurtarSaida(nome, r) {
+    // SÓ biblioteca e resultado de script (pedido do dono, 05/11/2026): as ferramentas que descrevem o projeto/documento
+    // e todo o resto vão INTEIRAS, a IA precisa ver tudo para não piorar o motion.
+    if (!SAIDA_ENCURTA[nome]) { return r; }
+    if (!r || r.erro || typeof r.texto !== 'string' || r.texto.length <= SAIDA_MAX || !node) { return r; }
+    var fs = R('fs'), path = R('path'), pasta = pastaSaidas(), id = nome + '-' + Date.now().toString(36);
+    garantirPasta(pasta);
+    // limpa as de mais de 1 dia (a conversa já seguiu)
+    try { fs.readdirSync(pasta).forEach(function (f) { var a = path.join(pasta, f); try { if (Date.now() - fs.statSync(a).mtimeMs > 86400000) { fs.unlinkSync(a); } } catch (e) {} }); } catch (e0) {}
+    var texto = r.texto;
+    // JSON numa linha só: quebra em linhas por item, pra busca e trechos funcionarem
+    try { var j = JSON.parse(texto); texto = JSON.stringify(j, null, 1); } catch (eJ) {}
+    fs.writeFileSync(path.join(pasta, id + '.txt'), texto, 'utf8');
+    var linhas = texto.split('\n').length;
+    var o = {}, k; for (k in r) { if (Object.prototype.hasOwnProperty.call(r, k)) { o[k] = r[k]; } }
+    o.texto = r.texto.slice(0, SAIDA_PONTA) + '\n[... ' + (r.texto.length - 2 * SAIDA_PONTA) + ' caracteres omitidos ...]\n' + r.texto.slice(-SAIDA_PONTA) +
+      '\n\nsaida_guardada: ' + id + ' (' + r.texto.length + ' caracteres, ' + linhas + ' linhas). A saída inteira ficou guardada no PC para economizar o limite: use ler_saida {id: "' + id + '", buscar: "..."} para pegar só o que precisa.';
+    return o;
+  }
+  function lerSaidaGuardada(args) {
+    var id = String(args.id || '').replace(/[^\w.-]/g, '');
+    if (!id) { return { erro: true, texto: 'ERRO: faltou o id da saída.' }; }
+    var arq = R('path').join(pastaSaidas(), id + '.txt'), texto;
+    try { texto = R('fs').readFileSync(arq, 'utf8'); } catch (e) { return { erro: true, texto: 'ERRO: essa saída não existe mais (vale 1 dia). Rode a ferramenta de novo.' }; }
+    var ls = texto.split('\n'), saida = [], busca = String(args.buscar || '').toLowerCase().trim();
+    var corta = function (l) { return l.length > SAIDA_LINHA_MAX ? l.slice(0, SAIDA_LINHA_MAX) + '…' : l; };
+    if (busca) {
+      // cada achado vem com 1 linha antes e 4 depois (o resto do item), sem repetir linha
+      var usadas = {};
+      ls.forEach(function (l, i) {
+        if (saida.length >= SAIDA_LINHAS_MAX || l.toLowerCase().indexOf(busca) < 0) { return; }
+        for (var j = Math.max(0, i - 1); j <= Math.min(ls.length - 1, i + 4); j++) { if (!usadas[j]) { usadas[j] = 1; saida.push((j + 1) + ': ' + corta(ls[j])); } }
+      });
+      return { texto: saida.length ? saida.join('\n') + (saida.length >= SAIDA_LINHAS_MAX ? '\n[mais resultados: refine a busca]' : '') : 'Nada encontrado para "' + args.buscar + '" (' + ls.length + ' linhas).' };
+    }
+    var de = Math.max(1, Math.floor(Number(args.de) || 1)), ate = Math.min(ls.length, Math.floor(Number(args.ate) || (de + 79)), de + SAIDA_LINHAS_MAX - 1);
+    for (var i = de; i <= ate; i++) { saida.push(i + ': ' + corta(ls[i - 1])); }
+    return { texto: saida.join('\n') + (ate < ls.length ? '\n[linhas ' + de + '-' + ate + ' de ' + ls.length + ']' : '') };
+  }
+
   function executarFerramentaPS(nome, args, fim, deJSX) {
     var ref = function (v) { return v === undefined || v === null ? '' : (typeof v === 'number' ? v : String(v)); };
     if (nome === 'ps_documento_info') { jsxCall('documentoInfo', [Number(args.profundidade) || 6, ref(args.grupo)], 60000, deJSX); return true; }

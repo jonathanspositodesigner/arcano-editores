@@ -913,7 +913,16 @@ function tokenImagem() {
 }
 const conexoesEditor = new Map();
 function conexaoEditor(app) {
-  const porta = PORTA_EDITOR_PC[app];
+  // a porta que o programa anotou (ArcanoMotion/controle-<app>.porta); sem ela, a padrão
+  let porta = PORTA_EDITOR_PC[app];
+  try {
+    const os = require('os'), path = require('path');
+    const base = process.platform === 'win32' ? (process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'))
+      : process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : null;
+    const arq = base ? path.join(base, 'ArcanoMotion', 'controle-' + app + '.porta') : path.join(os.homedir(), '.arcanomotion', 'controle-' + app + '.porta');
+    const n = Number(String(require('fs').readFileSync(arq, 'utf8')).trim());
+    if (porta && n >= 1024 && n < 65536) porta = n;
+  } catch (e) { /* sem arquivo: porta padrão */ }
   if (!porta) return Promise.reject(new Error('programa desconhecido'));
   const atual = conexoesEditor.get(app);
   if (atual && !atual.fechada) return Promise.resolve(atual);
@@ -1063,12 +1072,12 @@ function lerCorpo(req, limite = 25 * 1048576) {
   });
 }
 
-const SITE_PAINEL = 'https://layers.voxvisual.com.br';
+const SITE_PAINEL = process.env.ARCANO_SITE_PAINEL || 'https://layers.voxvisual.com.br';   // variável só para teste local
 function servirPainel(req, res) {
   const bruto = String(req.url).slice(3);   // /plugin/... ou /painel/...
   const caminho = bruto.split('?')[0];
   if (caminho.includes('..') || caminho.includes('\\') || !/^\/(plugin|painel)\/[A-Za-z0-9._\/-]*$/.test(caminho)) { res.writeHead(404); res.end(); return; }
-  const r = https.get(SITE_PAINEL + bruto, { headers: { 'User-Agent': 'ArcanoConector/' + VERSAO, 'Accept-Encoding': 'identity' }, timeout: 30000 }, (up) => {
+  const r = (SITE_PAINEL.startsWith('http:') ? require('http') : https).get(SITE_PAINEL + bruto, { headers: { 'User-Agent': 'ArcanoConector/' + VERSAO, 'Accept-Encoding': 'identity' }, timeout: 30000 }, (up) => {
     const h = { 'Content-Type': up.headers['content-type'] || 'application/octet-stream', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' };
     if (up.headers['content-length']) h['Content-Length'] = up.headers['content-length'];
     res.writeHead(up.statusCode === 200 ? 200 : (up.statusCode || 502), h);

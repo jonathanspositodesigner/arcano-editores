@@ -679,7 +679,7 @@
   }
   function noEditor(codigo, cb) {
     if (MODO_PC) {
-      op('/plugin/editorpc', { app: MODO_PC, codigo: codigo }).then(function (r) { cb(r || { ok: false, erro: 'sem resposta' }); }, function (e) { cb({ ok: false, erro: e.message }); });
+      op('/plugin/editorpc', { app: MODO_PC, codigo: codigo }).then(function (r) { cb(r || { ok: false, erro: 'sem resposta', transporte: true }); }, function (e) { cb({ ok: false, erro: e.message, transporte: true }); });
       return;
     }
     var id = 'e' + (++seq);
@@ -701,7 +701,8 @@
     if (m) {
       var arq = JSON.parse(m[1]);
       if (/arcano(-ps)?\.jsx$/i.test(arq)) {
-        if (!jsxCarregado) {
+        // programa de PC: o programa pode ter sido fechado e aberto; manda a biblioteca junto sempre (é local)
+        if (!jsxCarregado || MODO_PC) {
           try { jsxFonte = jsxFonte || lerDoSite(EXT_DIR + '/jsx/' + arq.split(/[\\/]/).pop(), 'utf8'); } catch (e) { cb('EvalScript error.'); return; }
           passos.push('var __arcanoJsx = ' + JSON.stringify(jsxFonte) + ';');
         }
@@ -710,7 +711,12 @@
     }
     var rodar = function () {
       noEditor(codigo, function (r) {
-        if (!r.ok) { cb('EvalScript error.'); try { console.warn('[Arcano] script do editor:', r.erro); } catch (e) {} return; }
+        if (!r.ok) {
+          try { console.warn('[Arcano] script do editor:', r.erro); } catch (e) {}
+          // programa de PC fora do ar / canal fechado: o motivo vai para o painel (e para a IA), não um "recusou" genérico
+          if (r.transporte) { cb(JSON.stringify({ ok: false, erro: 'Não consegui falar com o Arcano Layers ' + (MODO_PS ? 'Imagem' : 'Vídeo') + ': ' + r.erro + '. Abra o programa (ou feche e abra de novo) e tente outra vez.' })); return; }
+          cb('EvalScript error.'); return;
+        }
         cb(r.resultado == null ? '' : String(r.resultado));
       });
     };
@@ -769,7 +775,7 @@
     if (f) { return; }
     f = document.createElement('iframe');
     f.id = 'arcano-sem-conector';
-    f.src = '/painel/index.html#so-conector';
+    f.src = '../painel/index.html#so-conector';
     f.setAttribute('allow', 'local-network-access; clipboard-read; clipboard-write');
     f.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;z-index:99999;background:#141416';
     document.body.appendChild(f);

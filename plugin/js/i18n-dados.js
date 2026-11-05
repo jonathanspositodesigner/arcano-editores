@@ -179,3 +179,9 @@ window.ARCANO_I18N = {"exato": {"Skill Arcano Design": ["Arcano Design Skill", "
   };
   for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
 })(window.ARCANO_I18N);
+
+/* Saídas guardadas (1.2.31) */
+(function (D) {
+  var e = { "Lendo um trecho guardado": ["Reading a saved excerpt", "Leyendo un fragmento guardado"] };
+  for (var k in e) { if (!D.exato[k]) { D.exato[k] = e[k]; } }
+})(window.ARCANO_I18N);
