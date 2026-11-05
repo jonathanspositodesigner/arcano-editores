@@ -661,6 +661,9 @@ def painel_pc_video(r):
           "    /// The first frame was drawn (logged once).\n    drawn: bool,\n    /// O painel do Arcano Motion dentro da janela.\n    painel: painel_arcano::Painel,\n    /// Atualização pelo próprio programa.\n    atualizador: atualizador_arcano::Atualizador,\n}")
     troca(r, m, "                launch,\n                drawn: false,\n            }))",
           "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\"),\n                atualizador: atualizador_arcano::Atualizador::new(\"video\"),\n            }))")
+    # fechar o programa: solta o painel e garante que o processo termina
+    troca(r, m, "        let _ = self.app.session.execute(\"file.runShutdownScripts\", json!({}));\n",
+          "        let _ = self.app.session.execute(\"file.runShutdownScripts\", json!({}));\n        self.painel.sair();\n")
     troca(r, m, "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n",
           "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n"
           "        let lugar = effectcraft_ui_egui::arcano_painel::lugar(ui.ctx());\n"

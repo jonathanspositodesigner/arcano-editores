@@ -65,6 +65,24 @@ impl Painel {
         }
     }
 
+    /// O programa está fechando: solta o painel ainda com a janela viva e garante que o processo
+    /// termina (o WebView do sistema não pode segurar o programa aberto com a janela escura).
+    pub fn sair(&mut self) {
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            if let Some(web) = &self.web {
+                let _ = web.set_visible(false);
+            }
+            self.web = None;
+            self._contexto = None;
+        }
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(8));
+            log::warn!("o programa não terminou 8 s depois de fechar: encerrando");
+            std::process::exit(0);
+        });
+    }
+
     /// O que fazer com os recados do painel (o editor de imagem liga a barra rápida aqui).
     pub fn ao_receber(&mut self, f: fn(&str)) {
         self.ao_receber = Some(f);
@@ -138,8 +156,10 @@ impl Painel {
             }
             None => None,
         };
-        // menu ou lista aberta: o painel (janela do sistema) ficaria por cima dela
-        let lugar = if self.logado && egui::Popup::is_any_open(ctx) { None } else { lugar };
+        // menu, lista ou janela de aviso aberta (ex.: "Salvar alterações?" ao fechar o programa): o
+        // painel é uma janela do sistema e ficaria por cima, aceso no meio do fundo escurecido.
+        let aviso = ctx.memory(|m| m.top_modal_layer().is_some());
+        let lugar = if (self.logado && egui::Popup::is_any_open(ctx)) || aviso { None } else { lugar };
         #[cfg(any(windows, target_os = "macos"))]
         {
             if self.web.is_none() && lugar.is_some() && self.erro.is_none() {

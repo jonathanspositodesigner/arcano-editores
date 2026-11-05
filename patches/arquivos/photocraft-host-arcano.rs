@@ -21,6 +21,7 @@ impl Host {
 impl eframe::App for Host {
     fn on_exit(&mut self) {
         eframe::App::on_exit(&mut self.app);
+        self.painel.sair();
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
