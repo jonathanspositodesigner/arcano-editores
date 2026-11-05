@@ -59,6 +59,9 @@ struct Estado {
     /// Aviso curto embaixo da barra (texto, é erro) e até quando.
     aviso: Option<(String, bool, f64)>,
     saida: Vec<Value>,
+    /// Pedidos mandados que o painel ainda não confirmou (camada, quando foi): sem resposta em 20 s,
+    /// a barra solta a camada e avisa (painel fechado, sem login ou com o plugin antigo).
+    esperando: Vec<(u64, f64)>,
     referencia: Option<Referencia>,
     ctx: Option<egui::Context>,
 }
@@ -98,6 +101,7 @@ pub fn receber(texto: &str) {
                 }
             }
             "ocupada" => {
+                e.esperando.retain(|w| w.0 != camada);
                 let t = s("texto");
                 match e.ocupadas.iter_mut().find(|o| o.0 == camada) {
                     Some(o) => o.1 = t,
@@ -105,6 +109,7 @@ pub fn receber(texto: &str) {
                 }
             }
             "livre" => {
+                e.esperando.retain(|w| w.0 != camada);
                 e.ocupadas.retain(|o| o.0 != camada);
                 let erro = s("erro");
                 if !erro.is_empty() {
@@ -314,6 +319,19 @@ pub fn barra(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if bar.camada != camada {
         bar = Barra { camada, ..Barra::default() };
     }
+    // pedido que o painel não confirmou em 20 s: solta a camada e explica
+    let t_agora = agora(ctx);
+    com(|e| {
+        let vencidos: Vec<u64> = e.esperando.iter().filter(|w| t_agora - w.1 > 20.0).map(|w| w.0).collect();
+        if !vencidos.is_empty() {
+            e.esperando.retain(|w| !vencidos.contains(&w.0));
+            e.ocupadas.retain(|o| !vencidos.contains(&o.0));
+            e.aviso = Some(("O painel do Arcano Design não respondeu. Deixe o painel aberto (à direita), entre na conta e, se ele pedir, atualize o plugin.".into(), true, f64::MAX));
+        }
+        if !e.esperando.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
+    });
     let ocupada = com(|e| e.ocupadas.iter().find(|o| o.0 == camada).map(|o| o.1.clone()));
     let custos = com(|e| {
         let mut c = e.custos;
@@ -506,8 +524,10 @@ pub fn barra(app: &mut PhotocraftApp, ctx: &egui::Context) {
                                 }
                                 bar.texto.clear();
                             }
+                            let quando = agora(ctx);
                             com(|e| {
                                 e.ocupadas.push((p.camada, "Enviando…".into()));
+                                e.esperando.push((p.camada, quando));
                                 e.aviso = None;
                             });
                             mandar(pedido);

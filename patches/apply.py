@@ -466,6 +466,67 @@ def psd_fiel(r):
     troca(r, "crates/psd/src/parse.rs", "                l.text = Some(TextInfo { text, transform: t, style, bounds });",
           "                l.text = Some(TextInfo { text, transform: t, style, bounds, runs });")
     pi = "crates/engine/src/interchange/psd_import.rs"
+    # Ajustes que o editor de vídeo deixava VAZIOS (camada de ajuste sem efeito): Equilíbrio de Cores,
+    # Cor Seletiva e Pesquisa de Cores (o .cube que o PSD guarda dentro). Viram os efeitos do editor.
+    troca(r, "crates/psd/src/model.rs", "    /// Another adjustment (its tagged-block key, e.g. `curv`, `blnc`).\n    Other(String),",
+          "    /// Arcano: Equilíbrio de Cores (ciano-vermelho, magenta-verde, amarelo-azul: -100..100).\n"
+          "    ColorBalance { shadows: [f64; 3], midtones: [f64; 3], highlights: [f64; 3], preserve: bool },\n"
+          "    /// Arcano: Cor Seletiva (vermelhos, amarelos, verdes, cianos, azuis, magentas, brancos, neutros, pretos; C M Y K -100..100).\n"
+          "    SelectiveColor { absolute: bool, ranges: [[f64; 4]; 9] },\n"
+          "    /// Arcano: Pesquisa de Cores com o .cube guardado no PSD.\n"
+          "    ColorLookup { cube: String },\n"
+          "    /// Another adjustment (its tagged-block key, e.g. `curv`, `blnc`).\n    Other(String),")
+    troca(r, "crates/psd/src/parse.rs",
+          '            b"curv" | b"blnc" | b"post" | b"thrs" | b"selc" | b"mixr" | b"phfl" | b"vibA" | b"blwh" | b"grdm" | b"clrL" if l.adjustment.is_none() => {',
+          '            b"blnc" => {\n'
+          '                let mut tres = || -> Result<[f64; 3]> { Ok([f64::from(r.i16()?), f64::from(r.i16()?), f64::from(r.i16()?)]) };\n'
+          '                let (shadows, midtones, highlights) = (tres()?, tres()?, tres()?);\n'
+          '                let preserve = r.u8().map(|v| v != 0).unwrap_or(true);\n'
+          '                l.adjustment = Some(Adjustment::ColorBalance { shadows, midtones, highlights, preserve });\n'
+          '            }\n'
+          '            b"selc" => {\n'
+          '                let _ver = r.u16()?;\n'
+          '                let absolute = r.u16()? == 1;\n'
+          '                r.skip(8)?;\n'
+          '                let mut ranges = [[0.0f64; 4]; 9];\n'
+          '                for faixa in ranges.iter_mut() {\n'
+          '                    for v in faixa.iter_mut() {\n'
+          '                        *v = f64::from(r.i16()?);\n'
+          '                    }\n'
+          '                }\n'
+          '                l.adjustment = Some(Adjustment::SelectiveColor { absolute, ranges });\n'
+          '            }\n'
+          '            b"clrL" => {\n'
+          '                let _ver = r.u16()?;\n'
+          '                let _dver = r.u32()?;\n'
+          '                let d = descriptor::read_descriptor(&mut r)?;\n'
+          '                let cube = d.raw("LUT3DFileData").map(|b| String::from_utf8_lossy(b).into_owned()).filter(|s| s.contains("LUT_3D_SIZE"));\n'
+          '                l.adjustment = Some(match cube {\n'
+          '                    Some(cube) => Adjustment::ColorLookup { cube },\n'
+          '                    None => Adjustment::Other("clrL".into()),\n'
+          '                });\n'
+          '            }\n'
+          '            b"curv" | b"post" | b"thrs" | b"mixr" | b"phfl" | b"vibA" | b"blwh" | b"grdm" if l.adjustment.is_none() => {')
+    troca(r, pi, "        Adjustment::Other(k) => warnings.push(",
+          "        Adjustment::ColorBalance { shadows, midtones, highlights, preserve } => {\n"
+          "            let ids = [\"shadowRed\", \"shadowGreen\", \"shadowBlue\", \"midRed\", \"midGreen\", \"midBlue\", \"hiRed\", \"hiGreen\", \"hiBlue\"];\n"
+          "            let vals: Vec<f64> = shadows.iter().chain(midtones.iter()).chain(highlights.iter()).copied().collect();\n"
+          "            let mut p: Vec<(&str, Value)> = ids.iter().zip(vals).map(|(k, v)| (*k, Value::Scalar(v))).collect();\n"
+          "            p.push((\"preserveLuminosity\", Value::Bool(*preserve)));\n"
+          "            add_effect(proj, l, \"Color Balance\", comp, &p)\n"
+          "        }\n"
+          "        Adjustment::SelectiveColor { absolute, ranges } => {\n"
+          "            const G: [&str; 9] = [\"reds\", \"yellows\", \"greens\", \"cyans\", \"blues\", \"magentas\", \"whites\", \"neutrals\", \"blacks\"];\n"
+          "            const C: [&str; 4] = [\"Cyan\", \"Magenta\", \"Yellow\", \"Black\"];\n"
+          "            let ids: Vec<String> = G.iter().flat_map(|g| C.iter().map(move |c| format!(\"details/{g}/{g}{c}\"))).collect();\n"
+          "            let mut p: Vec<(&str, Value)> = vec![(\"method\", Value::Enum(u32::from(*absolute)))];\n"
+          "            for (k, id) in ids.iter().enumerate() {\n"
+          "                p.push((id.as_str(), Value::Scalar(ranges[k / 4][k % 4])));\n"
+          "            }\n"
+          "            add_effect(proj, l, \"Selective Color\", comp, &p)\n"
+          "        }\n"
+          "        Adjustment::ColorLookup { cube } => add_effect(proj, l, \"Apply Color LUT\", comp, &[(\"lut\", Value::Str(cube.clone()))]),\n"
+          "        Adjustment::Other(k) => warnings.push(")
     troca(r, pi, "fn text_doc(t: &effectcraft_psd::TextInfo) -> TextDoc {",
           "/// Arcano: o nome PostScript do PSD → a família e o estilo da fonte INSTALADA (como o editor de\n"
           "/// imagem acha). Sem a fonte: o nome inteiro (acha sozinho quando for instalada).\n"
