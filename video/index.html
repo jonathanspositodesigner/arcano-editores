@@ -55,6 +55,7 @@
       inspect: () => ec.request("ui.inspect", {}),
       screenshot: (params) => ec.request("ui.screenshot", params ?? {}),
       renderFrame: (params) => ec.request("render.frame", { base64: true, ...(params ?? {}) }),
+      arcano: ec,
       files: () => ec.files(),
       readFile: (path) => ec.readFile(path),
       addFile: async (fileOrUrl, name) => {
