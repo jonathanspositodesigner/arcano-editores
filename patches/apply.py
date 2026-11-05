@@ -1081,6 +1081,23 @@ fn arcano_controle(
     p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
 
 
+def hd_trabalho(r):
+    """Programa de PC (vídeo): Editar ▸ HD de trabalho… escolhe o HD do cache da prévia, do cache
+    de mídia e do áudio convertido (os três de uma vez); abre sozinha quando o HD do cache está
+    quase cheio (arquivos/ui-arcano-hd.rs). No navegador o cache fica no próprio navegador."""
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-hd.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_hd.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod arcano_carregando;\n", "pub mod arcano_carregando;\npub mod arcano_hd;\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs", "        crate::arcano_carregando::quadro(self, &ctx);\n",
+          "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_hd::quadro(self, &ctx);\n")
+    troca(r, "crates/ui-egui/src/menus/invoke.rs", "    if crate::arcano_carregando::adiar(id, &params) {\n",
+          "    if id == \"arcano.hdTrabalho\" {\n        crate::arcano_hd::abrir();\n        ctx.request_repaint();\n        return Ok(Value::Null);\n    }\n"
+          "    if crate::arcano_carregando::adiar(id, &params) {\n")
+    troca(r, "crates/ui-egui/src/menus/entries.rs", '    if e.command == "window.panel" {\n',
+          '    if e.command == "arcano.hdTrabalho" {\n        return true;\n    }\n    if e.command == "window.panel" {\n')
+    troca(r, "crates/engine/src/menus.rs", '    Snapshot | edit.purge {"what":"snapshot"} | Cmd+Shift+F5\n',
+          '    Snapshot | edit.purge {"what":"snapshot"} | Cmd+Shift+F5\n  HD de trabalho (cache)... | arcano.hdTrabalho\n')
+
+
 def desktop(app, raiz):
     """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
     que só existem no programa de computador (janela, diálogos)."""
@@ -1090,6 +1107,7 @@ def desktop(app, raiz):
     if app == "effectcraft":
         icones.gerar("video", pathlib.Path(raiz) / "assets/app-icon", "effectcraft", "ai.storyteller.effectcraft")
         painel_pc_video(raiz)
+        hd_trabalho(raiz)
         # Sem o atualizador do programa original (baixaria a versão deles, com o nome deles): quem atualiza somos nós.
         troca(raiz, "apps/effectcraft/src/main.rs", "            app.set_startup_update_check(true);", "            app.set_startup_update_check(false);")
         troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null", "            let _ = &app;\n            Value::Null")
