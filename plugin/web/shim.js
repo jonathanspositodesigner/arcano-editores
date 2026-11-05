@@ -616,7 +616,14 @@
       catch (e) { try { console.warn('[Arcano] não consegui gravar no PC:', a.caminho, e.message); } catch (x) {} }
     });
   }
+  // Programa de PC (?pc=video): o painel está numa janela do navegador ao lado do programa instalado;
+  // o script vai direto para ele pelo conector (os arquivos já estão no PC, nada para copiar).
+  var MODO_PC = (/[?&]pc=(video)\b/.exec(location.search) || [])[1] || null;
   function noEditor(codigo, cb) {
+    if (MODO_PC) {
+      op('/plugin/editorpc', { app: MODO_PC, codigo: codigo }).then(function (r) { cb(r || { ok: false, erro: 'sem resposta' }); }, function (e) { cb({ ok: false, erro: e.message }); });
+      return;
+    }
     var id = 'e' + (++seq);
     var arquivos = arquivosDoScript(codigo);
     pedidos[id] = function (r) { devolverAoPC(r.arquivos); cb(r); };
@@ -644,6 +651,23 @@
       });
     };
     if (passos.length) { noEditor(passos.join('\n'), function (r) { if (r.ok) { jsxCarregado = true; } rodar(); }); } else { rodar(); }
+  }
+  // Aviso "abra o programa" no modo PC (e recarrega a biblioteca quando o programa reabre).
+  function vigiarProgramaPC() {
+    var aviso = null, estava = null;
+    var ver = function () {
+      op('/plugin/editorpc/aberto', { app: MODO_PC }).then(function (aberto) {
+        if (aberto && estava === false) { jsxCarregado = false; }
+        estava = !!aberto;
+        if (!aberto && !aviso) {
+          aviso = document.createElement('div');
+          aviso.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99998;padding:12px 14px;border-radius:12px;background:#2a1747;border:1px solid #7c3aed;color:#fff;font:13px/1.4 system-ui,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.4)';
+          aviso.textContent = 'Abra o Arcano Layers Vídeo no seu computador: o painel do Arcano Motion conversa com ele.';
+          document.body.appendChild(aviso);
+        } else if (aberto && aviso) { aviso.parentNode.removeChild(aviso); aviso = null; }
+      }, function () {}).then(function () { setTimeout(ver, 3000); });
+    };
+    ver();
   }
   var cepFalso = {
     evalScript: evalScript,
@@ -695,7 +719,7 @@
   }
   function iniciar() {
     acharConector().then(function (r) {
-      if (!r || !/^0\.[2-9]|^[1-9]/.test(String(r.status.versao || ''))) {
+      if (!r || !(MODO_PC ? /^0\.[3-9]|^[1-9]/ : /^0\.[2-9]|^[1-9]/).test(String(r.status.versao || ''))) {
         // sem conector, ou conector antigo (sem a API do plugin): ensina a instalar/atualizar
         telaSemConector();
         setTimeout(iniciar, 4000);
@@ -717,7 +741,9 @@
       window.__adobe_cep__ = cepFalso;
       window.cep = cepUtil;
       window.ARCANO_NAVEGADOR = true;
+      window.ARCANO_PC = !!MODO_PC;
       carregarScripts(window.ARCANO_SCRIPTS || [], 0);
+      if (MODO_PC) { document.title = 'Arcano Motion'; vigiarProgramaPC(); }
     });
   }
   if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', iniciar); } else { iniciar(); }

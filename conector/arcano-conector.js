@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const VERSAO = '0.2.0';
+const VERSAO = '0.3.0';
 const PORTAS = [47821, 47822, 47823, 47824, 47825];
 const ORIGENS = [
   'https://layers.voxvisual.com.br',
@@ -899,6 +899,59 @@ function opServidor(sid) {
   });
 }
 
+// Programa de PC do Arcano Layers (vídeo): o painel do plugin roda numa janela do navegador e o
+// ExtendScript vai para o editor instalado pelo canal de controle local (127.0.0.1:47890). Só
+// script.run passa (o script do editor só grava nas pastas do Arcano: regra do próprio editor).
+const PORTA_EDITOR_PC = { video: 47890 };
+const conexoesEditor = new Map();
+function conexaoEditor(app) {
+  const porta = PORTA_EDITOR_PC[app];
+  if (!porta) return Promise.reject(new Error('programa desconhecido'));
+  const atual = conexoesEditor.get(app);
+  if (atual && !atual.fechada) return Promise.resolve(atual);
+  return new Promise((resolve, reject) => {
+    const net = require('net');
+    const sock = net.connect({ host: '127.0.0.1', port: porta });
+    const con = { sock, fechada: false, seq: 0, esperando: new Map(), resto: '' };
+    sock.setEncoding('utf8');
+    sock.on('connect', () => { conexoesEditor.set(app, con); resolve(con); });
+    sock.on('data', (d) => {
+      con.resto += d;
+      let i;
+      while ((i = con.resto.indexOf('\n')) >= 0) {
+        const linha = con.resto.slice(0, i); con.resto = con.resto.slice(i + 1);
+        if (!linha.trim()) continue;
+        let r; try { r = JSON.parse(linha); } catch (e) { continue; }
+        const cb = con.esperando.get(r.id);
+        if (cb) { con.esperando.delete(r.id); cb(r); }
+      }
+    });
+    const fechar = (e) => {
+      con.fechada = true; conexoesEditor.delete(app);
+      for (const cb of con.esperando.values()) cb({ ok: false, error: 'o programa do Arcano Layers fechou' });
+      con.esperando.clear();
+      reject(e || new Error('fechou'));
+    };
+    sock.on('error', (e) => fechar(new Error(e.code === 'ECONNREFUSED' ? 'o programa do Arcano Layers não está aberto' : e.message)));
+    sock.on('close', () => fechar());
+  });
+}
+async function opEditorPC(c) {
+  const codigo = String(c.codigo || '');
+  if (codigo.length > 64 * 1048576) throw new Error('script grande demais');
+  const con = await conexaoEditor(String(c.app || 'video'));
+  const id = ++con.seq;
+  const r = await new Promise((resolve) => {
+    const t = setTimeout(() => { con.esperando.delete(id); resolve({ ok: false, error: 'o editor não respondeu em 10 minutos' }); }, 600000);
+    con.esperando.set(id, (x) => { clearTimeout(t); resolve(x); });
+    con.sock.write(JSON.stringify({ id, method: 'engine.execute', params: { command: 'script.run', params: { code: codigo, name: 'arcano-motion', console: true } } }) + '\n');
+  });
+  if (!r.ok) return { ok: false, erro: String(r.error || 'erro no editor') };
+  const res = r.result || {};
+  if (res.error) return { ok: false, erro: typeof res.error === 'string' ? res.error : JSON.stringify(res.error) };
+  return { ok: true, resultado: res.result === undefined ? null : res.result };
+}
+
 async function tratarPlugin2(url, json, c) {
   const sid = String(c.sid || 'x');
   const tentar = async (fn) => { try { json(200, { ok: true, v: cod(await fn()) }); } catch (e) { json(200, { ok: false, e: erroJSON(e) }); } };
@@ -912,6 +965,8 @@ async function tratarPlugin2(url, json, c) {
     case '/plugin/zipar': await tentar(() => opZipar(c)); return true;
     case '/plugin/achar': await tentar(() => opAcharPrograma(c)); return true;
     case '/plugin/janela': await tentar(() => opJanela(c)); return true;
+    case '/plugin/editorpc': await tentar(() => opEditorPC(c)); return true;
+    case '/plugin/editorpc/aberto': await tentar(() => conexaoEditor(String(c.app || 'video')).then(() => true, () => false)); return true;
     case '/plugin/servidor': await tentar(() => opServidor(sid)); return true;
     case '/plugin/servidor/fechar': await tentar(() => { const s = servidoresPlugin.get(c.id); if (s) { s.close(); servidoresPlugin.delete(c.id); } return true; }); return true;
     case '/plugin/servidor/resposta': await tentar(() => {

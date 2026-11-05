@@ -206,9 +206,45 @@ def effectcraft(r):
           '"short_name": "EffectCraft"', '"short_name": "Arcano Vídeo"')
 
     # ── Compatibilidade com a biblioteca do plugin (arcano.jsx), testada no motor de script ──
-    # O plugin grava quadros/arquivos pelo script (no navegador vão para a memória do editor e
-    # voltam ao PC pelo conector): liberado por padrão.
-    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    allow_scripts_write_files: bool = false,", "    allow_scripts_write_files: bool = true,")
+    # O plugin grava quadros/renders pelo script e importa os arquivos da pessoa. Sem ligar a
+    # preferência "Allow Scripts to Write Files" (ela libera tudo: rede, executar arquivo, gravar em
+    # qualquer pasta), o script pode GRAVAR só nas pastas do Arcano e LER arquivos de mídia.
+    rt = "crates/script/src/runtime.rs"
+    troca(r, rt, """fn check_access(s: &Session, path: &str, write: bool) -> Result<std::path::PathBuf, String> {
+    let p = normalize(path);
+    if s.prefs.scripting.allow_scripts_write_files {
+        return Ok(p);
+    }""", """fn check_access(s: &Session, path: &str, write: bool) -> Result<std::path::PathBuf, String> {
+    let p = normalize(path);
+    if s.prefs.scripting.allow_scripts_write_files {
+        return Ok(p);
+    }
+    if arcano_liberado(path, write) {
+        return Ok(p);
+    }""")
+    troca(r, rt, "pub(crate) const GATE: &str =", """/// Arcano Layers (plugin Arcano Motion): gravar só nas pastas do Arcano; ler também arquivos de mídia.
+fn arcano_liberado(path: &str, write: bool) -> bool {
+    let t = path.replace('\\\\', "/").to_lowercase();
+    if t.split('/').any(|c| c == "..") || t.contains('\\0') {
+        return false;
+    }
+    let pastas = ["/appdata/local/temp/arcano", "/tmp/arcano", "/arcano-motion/", "/documents/arcano motion", "/documents/arcano design",
+        "/appdata/roaming/arcanomotion/", "/appdata/roaming/arcanodesign/", "/application support/arcanomotion/", "/application support/arcanodesign/",
+        "/.arcanomotion/"];
+    let em_pasta = pastas.iter().any(|p| t.contains(p)) && !t.contains("/arcanomotion/bin/") && !t.contains("/arcanomotion/ouvido/");
+    if em_pasta && !t.ends_with(".exe") && !t.ends_with(".bat") && !t.ends_with(".cmd") && !t.ends_with(".ps1") && !t.ends_with(".vbs") && !t.ends_with(".sh") {
+        return true;
+    }
+    if write {
+        return false;
+    }
+    let ext = t.rsplit('.').next().unwrap_or("");
+    ["png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "psd", "psb", "ai", "svg", "eps", "pdf", "exr", "mp4", "mov", "m4v", "webm", "mkv", "avi", "wav", "mp3",
+        "m4a", "aac", "ogg", "flac", "aif", "aiff", "aep", "aepx", "ecproj", "ttf", "otf", "json", "jsx", "cube", "txt", "srt"]
+        .contains(&ext)
+}
+
+pub(crate) const GATE: &str =""")
     # matchName do Keylight no After ("Keylight 906"): o editor tem o Key Light com outros apelidos.
     troca(r, "crates/effects/src/keylight.rs", 'pub const KEYLIGHT_ALIASES: &[&str] = &["Keylight (1.2)", "Keylight"];',
           'pub const KEYLIGHT_ALIASES: &[&str] = &["Keylight (1.2)", "Keylight", "Keylight 906"];')
@@ -354,6 +390,71 @@ fn lazy_name(entry: &str) -> Option<&'static str> {
                     nomes=(("EffectCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br")))
 
 
+PAINEL_PC_VIDEO = "https://layers.voxvisual.com.br/plugin/index-web.html?pc=video"
+
+
+def painel_pc_video(r):
+    """Programa de PC (vídeo): o painel do Arcano Motion (o MESMO do After) abre numa janela do
+    Chrome/Edge ao lado do programa e manda os scripts pelo Arcano Conector para o canal local do
+    programa (127.0.0.1:47890, só JSON por linha; pedido de página web é recusado na 1ª linha)."""
+    m = "apps/effectcraft/src/main.rs"
+    troca(r, m, "            if let Some(port) = control_port {\n                disable_app_nap();",
+          "            if control_port.is_none() {\n                abrir_painel_arcano();\n            }\n"
+          "            if let Some(port) = control_port.or(Some(ARCANO_PORTA)) {\n                disable_app_nap();")
+    troca(r, m, "/// Driven by an agent (`--control`): don't activate the app on launch",
+          """/// Canal do painel Arcano Motion (o conector conversa com o programa por aqui).
+const ARCANO_PORTA: u16 = 47890;
+
+/// Abre o painel do Arcano Motion numa janela própria do Chrome ou do Edge (sem abas), ou no
+/// navegador padrão se nenhum dos dois estiver instalado.
+fn abrir_painel_arcano() {
+    let url = "{PAINEL}";
+    std::thread::spawn(move || {
+        let app = format!("--app={url}");
+        let tentar = |exe: std::path::PathBuf| -> bool {
+            exe.is_file() && std::process::Command::new(&exe).arg(&app).arg("--window-size=460,940").spawn().is_ok()
+        };
+        #[cfg(target_os = "windows")]
+        {
+            for var in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
+                let Some(base) = std::env::var_os(var) else { continue };
+                if tentar(std::path::Path::new(&base).join("Google\\\\Chrome\\\\Application\\\\chrome.exe")) {
+                    return;
+                }
+            }
+            for var in ["ProgramFiles(x86)", "ProgramFiles"] {
+                let Some(base) = std::env::var_os(var) else { continue };
+                if tentar(std::path::Path::new(&base).join("Microsoft\\\\Edge\\\\Application\\\\msedge.exe")) {
+                    return;
+                }
+            }
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("cmd").args(["/C", "start", "", url]).creation_flags(0x0800_0000).spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let casa = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            for base in [std::path::PathBuf::from("/Applications"), casa.join("Applications")] {
+                if tentar(base.join("Google Chrome.app/Contents/MacOS/Google Chrome")) || tentar(base.join("Microsoft Edge.app/Contents/MacOS/Microsoft Edge")) {
+                    return;
+                }
+            }
+            let _ = std::process::Command::new("open").arg(url).spawn();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        {
+            let _ = &tentar;
+            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        }
+    });
+}
+
+/// Driven by an agent (`--control`): don't activate the app on launch""".replace("{PAINEL}", PAINEL_PC_VIDEO))
+    # Menu Ajuda do programa de PC: reabrir o painel (o link "página do app" vira o painel).
+    troca(r, "crates/engine/src/menus.rs", "  Entrar no grupo do WhatsApp | help.discord\n", "  Painel do Arcano Motion | help.appPage\n  ---\n  Entrar no grupo do WhatsApp | help.discord\n")
+    troca(r, "crates/engine/src/home/links.rs", f'pub const APP_PAGE: &str = "{VOLTAR}";', f'pub const APP_PAGE: &str = "{PAINEL_PC_VIDEO}";')
+
+
 def desktop(app, raiz):
     """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
     que só existem no programa de computador (janela, diálogos)."""
@@ -362,6 +463,7 @@ def desktop(app, raiz):
     nomes = (("EffectCraft", None), ("PhotoCraft", None), ("ArtCraft", "ArcanoApp"), ("getartcraft.com", "arcanoapp.voxvisual.com.br"))
     if app == "effectcraft":
         icones.gerar("video", pathlib.Path(raiz) / "assets/app-icon", "effectcraft", "ai.storyteller.effectcraft")
+        painel_pc_video(raiz)
         nomes_restantes(raiz, pastas=("apps/effectcraft/src",), nomes=nomes)
     else:
         icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
