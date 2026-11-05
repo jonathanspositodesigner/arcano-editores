@@ -7061,7 +7061,8 @@
 
   function verificarAtualizacaoPlugin(cb) {
     var url = (window.ARCANO_APP || {}).atualizacao;
-    if (!url || !node) { if (cb) { cb(null); } return; }
+    // no navegador o espelho já é sempre a versão publicada: nada para instalar
+    if (!url || !node || window.ARCANO_NAVEGADOR) { if (cb) { cb(null); } return; }
     lerJSONUrl(url, function (e, info) {
       info = e ? null : infoDoSistema(info);
       if (e || !info || !info.versao || !info.url) { if (cb) { cb(null); } return; }
@@ -8570,6 +8571,8 @@
   }
   function pastaVideosIA(projeto) {
     var path = R('path');
+    // no navegador (espelho no Arcano Layers) o projeto mora no editor, não numa pasta do PC
+    if (window.ARCANO_NAVEGADOR) { projeto = null; }
     if (ehPS()) { return projeto ? path.join(path.dirname(projeto), 'Arcano Design') : pastaDocumentosDesign(); }
     if (projeto) { return path.join(path.dirname(projeto), 'Arcano IA'); }
     return path.join(R('os').homedir(), 'Documents', 'Arcano Motion IA');
@@ -12192,6 +12195,7 @@
 
   function pastaLUTs(projeto) {
     var path = R('path');
+    if (window.ARCANO_NAVEGADOR) { projeto = null; }
     if (projeto) { return path.join(path.dirname(projeto), 'Arcano LUTs'); }
     return path.join(R('os').homedir(), 'Documents', 'Arcano Motion LUTs');
   }

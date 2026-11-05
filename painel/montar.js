@@ -82,12 +82,31 @@
     var d = ev.data || {};
     if (d.arcano !== 'eval') { return; }
     var responder = function (o) { o.arcano = 'eval-resposta'; o.id = d.id; painel.contentWindow.postMessage(o, '*'); };
+    // arquivos do PC usados pelo script (mesmo caminho) e o que o script gravar em caminho do PC (volta ao plugin)
+    var ec = window.effectcraft;
+    var ehDoPC = function (p) { return /^[A-Za-z]:[\\/]|^\/(Users|home|tmp|private|var\/folders)\//.test(p); };
+    var antes = {};
+    var fotografar = function () { var m = {}; try { (ec.files() || []).forEach(function (f) { m[f.path] = f.size; }); } catch (e) {} return m; };
+    var novos = function () {
+      var depois = fotografar(), lista = [];
+      Object.keys(depois).forEach(function (p) {
+        if (!ehDoPC(p) || antes[p] === depois[p] && String(d.codigo).indexOf(JSON.stringify(p).slice(1, -1)) < 0) { return; }
+        if ((d.arquivos || []).some(function (a) { return a.caminho === p; })) { return; } // o que acabou de chegar do PC
+        var b = ec.readFile(p); if (b) { lista.push({ caminho: p, bytes: b }); }
+      });
+      return lista;
+    };
     var tentar = function (n) {
-      Promise.resolve(window.effectcraft.request('script.run', { code: String(d.codigo || ''), name: 'arcano-motion', console: true }))
+      if (n === 0) {
+        (d.arquivos || []).forEach(function (a) { try { if (ec.putFile) { ec.putFile(a.caminho, a.bytes); } } catch (e) { /* editor antigo */ } });
+        antes = fotografar();
+      }
+      Promise.resolve(ec.request('script.run', { code: String(d.codigo || ''), name: 'arcano-motion', console: true }))
         .then(function (r) {
           r = r || {};
-          if (r.error) { responder({ ok: false, erro: typeof r.error === 'string' ? r.error : JSON.stringify(r.error) }); return; }
-          responder({ ok: true, resultado: r.result });
+          var arquivos = novos();
+          if (r.error) { responder({ ok: false, erro: typeof r.error === 'string' ? r.error : JSON.stringify(r.error), arquivos: arquivos }); return; }
+          responder({ ok: true, resultado: r.result, arquivos: arquivos });
         }, function (er) {
           // o editor ainda está abrindo: tenta de novo por até 2 minutos
           if (/not running yet/i.test(String(er)) && n < 240) { setTimeout(function () { tentar(n + 1); }, 500); return; }

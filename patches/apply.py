@@ -205,6 +205,28 @@ def effectcraft(r):
     troca(r, "apps/effectcraft-web/web/manifest.webmanifest",
           '"short_name": "EffectCraft"', '"short_name": "Arcano Vídeo"')
 
+    # ── Ponte com o plugin Arcano Motion (espelho): arquivos do PC no editor ──
+    # O plugin trabalha com caminhos do PC (importar logo/vídeo, salvar quadros). O shim copia o
+    # arquivo para a memória do editor com o MESMO caminho (putFile) e devolve ao PC o que o
+    # editor gravou; gravar num caminho do PC não vira download no navegador.
+    fw = "apps/effectcraft-web/src/files.rs"
+    troca(r, fw, "pub fn get(path: &str) -> Option<Arc<[u8]>> {",
+          "/// Arcano: arquivo do PC (vindo do plugin) só na memória, sem gravar no navegador.\n"
+          "pub fn put_arcano(path: &str, data: Arc<[u8]>) {\n    STORE.put_file(path, data, false);\n}\n\n"
+          "/// Arcano: caminho do PC (o plugin copia de volta pelo conector): sem download.\n"
+          "pub fn caminho_do_pc(path: &str) -> bool {\n"
+          "    let b = path.as_bytes();\n"
+          "    (b.len() > 2 && b[1] == b':' && (b[2] == b'\\\\' || b[2] == b'/'))\n"
+          "        || [\"/Users/\", \"/home/\", \"/tmp/\", \"/private/\", \"/var/folders/\"].iter().any(|p| path.starts_with(p))\n"
+          "}\n\n"
+          "pub fn get(path: &str) -> Option<Arc<[u8]>> {")
+    troca(r, fw, "        if quiet || crate::is_worker() {\n            return Ok(());\n        }\n        download(",
+          "        if quiet || crate::is_worker() || caminho_do_pc(path) {\n            return Ok(());\n        }\n        download(")
+    troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
+          "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
+          "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
+          "    crate::files::put_arcano(&path, data.to_vec().into());\n}\n\n"
+          "/// Put bytes into the file table under `/<name>` and open")
     # ── Travamento do Chrome (RESULT_CODE_HUNG / "placa de vídeo parou") ──
     # Causa: ao abrir, o editor compilava de uma vez os 237 programas de GPU (todos os efeitos,
     # um shader de 514 KB). No Chrome cada um vira compilação HLSL no processo da GPU; somados,

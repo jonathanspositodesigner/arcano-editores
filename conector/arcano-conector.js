@@ -400,6 +400,9 @@ function conferirCaminho(caminho, modo) {
   if (!ok(p) || !ok(r)) throw codigoErro('EACCES', 'o Arcano não tem acesso a ' + p);
   return p;
 }
+// Caminho dentro das pastas de programas (bin, ouvido) ou null.
+function emProgramas(p) { try { const n = real(normal(p)); return pastasArcano().programas.some((d) => dentro(n, d)) ? n : null; } catch (e) { return null; } }
+const urlsConfiaveis = new Set(); // destinos de redirecionamento das releases oficiais (yt-dlp, sherpa-onnx)
 function liberarLeitura(p) { const n = normal(p); liberadosLeitura.add(WIN ? n.toLowerCase() : n); const r = real(n); liberadosLeitura.add(WIN ? r.toLowerCase() : r); }
 
 // ─── Codificação (Buffer, Stats, Date) entre conector e navegador ───
@@ -441,24 +444,36 @@ function opcoes(o) {
 function opArquivo(c) {
   const a = dec(c.a || []);
   switch (c.f) {
-    case 'readFileSync': { const p = conferirCaminho(a[0], 'ler'); return fs.readFileSync(p, opcoes(a[1])); }
-    case 'writeFileSync': { const p = conferirCaminho(a[0], 'gravar'); fs.writeFileSync(p, a[1], opcoes(a[2])); return undefined; }
+    case 'readFileSync': {
+      if (ehConfigCodex(a[0])) return fs.readFileSync(normal(a[0]), opcoes(a[1]));
+      const p = conferirCaminho(a[0], 'ler'); return fs.readFileSync(p, opcoes(a[1]));
+    }
+    case 'writeFileSync': {
+      if (ehConfigCodex(a[0])) { gravarConfigCodex(normal(a[0]), String(a[1])); return undefined; }
+      const p = conferirCaminho(a[0], 'gravar'); fs.writeFileSync(p, a[1], opcoes(a[2])); return undefined;
+    }
     case 'appendFileSync': { const p = conferirCaminho(a[0], 'gravar'); fs.appendFileSync(p, a[1], opcoes(a[2])); return undefined; }
-    case 'existsSync': { try { return fs.existsSync(conferirCaminho(a[0], 'ler')); } catch (e) { return false; } }
-    case 'statSync': case 'lstatSync': { const p = conferirCaminho(a[0], 'ler'); return stat(fs[c.f](p)); }
+    // Só metadados (existe? tamanho? data?): o plugin procura Chrome, Claude, Codex, tar… fora das pastas do Arcano.
+    case 'existsSync': { try { return fs.existsSync(normal(a[0])); } catch (e) { return false; } }
+    case 'statSync': case 'lstatSync': { const p = normal(a[0]); return stat(fs[c.f](p)); }
     case 'readdirSync': {
       const p = conferirCaminho(a[0], 'ler'), o = opcoes(a[1]) || {};
       if (o && o.withFileTypes) return fs.readdirSync(p, { withFileTypes: true }).map((d) => ({ __de: { name: d.name, arquivo: d.isFile(), pasta: d.isDirectory(), link: d.isSymbolicLink() } }));
       return fs.readdirSync(p, typeof o === 'string' ? o : undefined);
     }
-    case 'unlinkSync': fs.unlinkSync(conferirCaminho(a[0], 'gravar')); return undefined;
+    case 'unlinkSync': fs.unlinkSync(emProgramas(a[0]) || conferirCaminho(a[0], 'gravar')); return undefined;
     case 'rmdirSync': fs.rmdirSync(conferirCaminho(a[0], 'gravar'), opcoes(a[1])); return undefined;
     case 'rmSync': fs.rmSync(conferirCaminho(a[0], 'gravar'), opcoes(a[1])); return undefined;
-    case 'mkdirSync': fs.mkdirSync(conferirCaminho(a[0], 'gravar'), opcoes(a[1])); return undefined;
-    case 'renameSync': fs.renameSync(conferirCaminho(a[0], 'gravar'), conferirCaminho(a[1], 'gravar')); return undefined;
+    case 'mkdirSync': fs.mkdirSync(emProgramas(a[0]) || conferirCaminho(a[0], 'gravar'), opcoes(a[1])); return undefined;
+    case 'renameSync': {
+      // dentro da pasta de programas só de lá para lá (o arquivo veio de um download confiável)
+      const p1 = emProgramas(a[0]), p2 = emProgramas(a[1]);
+      if (p1 || p2) { if (!(p1 && p2)) throw codigoErro('EACCES', 'não pode mover para a pasta de programas'); fs.renameSync(p1, p2); return undefined; }
+      fs.renameSync(conferirCaminho(a[0], 'gravar'), conferirCaminho(a[1], 'gravar')); return undefined;
+    }
     case 'copyFileSync': fs.copyFileSync(conferirCaminho(a[0], 'ler'), conferirCaminho(a[1], 'gravar')); return undefined;
-    case 'utimesSync': fs.utimesSync(conferirCaminho(a[0], 'gravar'), a[1], a[2]); return undefined;
-    case 'chmodSync': conferirCaminho(a[0], 'gravar'); return undefined; // nada de permissão de executar
+    case 'utimesSync': fs.utimesSync(emProgramas(a[0]) || conferirCaminho(a[0], 'gravar'), a[1], a[2]); return undefined;
+    case 'chmodSync': { const p = emProgramas(a[0]); if (p) fs.chmodSync(p, 0o755); else conferirCaminho(a[0], 'gravar'); return undefined; } // executável só na pasta de programas
     case 'lerTrecho': { // openSync + readSync + closeSync de um pedaço
       const p = conferirCaminho(a[0], 'ler'), fd = fs.openSync(p, 'r');
       try { const b = Buffer.alloc(Math.min(a[2] || 0, 64 * 1048576)); const n = fs.readSync(fd, b, 0, b.length, a[1] || 0); return b.slice(0, n); } finally { fs.closeSync(fd); }
@@ -549,6 +564,13 @@ function opHttp(c) {
     const acabar = (x) => { if (!fim) { fim = true; resolve(x); } };
     const req = https.request(op, (res) => {
       res.pause();
+      const urlPedida = 'https://' + host + String(o.path || '/');
+      const oficial = host === 'github.com' && /^\/(yt-dlp\/yt-dlp|k2-fsa\/sherpa-onnx)\/releases\//.test(String(o.path || ''));
+      res._confiavel = oficial || urlsConfiaveis.has(urlPedida);
+      // redirecionamento de uma release oficial: o destino também é confiável (só ele, uma vez)
+      if (res._confiavel && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        try { urlsConfiaveis.add(new URL(res.headers.location, urlPedida).href); } catch (e) { /* endereço estranho */ }
+      }
       const id = 'h' + (++seqHttp);
       respostasHttp.set(id, res);
       setTimeout(() => { if (respostasHttp.get(id) === res) { respostasHttp.delete(id); res.resume(); } }, 10 * 60000);
@@ -568,7 +590,13 @@ function opHttpCorpo(c) {
     if (c.descartar) { res.resume(); resolve({ ok: true }); return; }
     if (c.caminho) {
       let destino;
-      try { destino = conferirCaminho(c.caminho, 'gravar'); } catch (e) { res.resume(); resolve({ err: erroJSON(e) }); return; }
+      try {
+        const P = pastasArcano(), alvo = real(normal(c.caminho));
+        const deProgramas = P.programas.some((d) => dentro(alvo, d));
+        // Programas (yt-dlp, ouvido) só baixados das releases oficiais no GitHub.
+        if (deProgramas && res._confiavel) { fs.mkdirSync(path.dirname(alvo), { recursive: true }); destino = alvo; }
+        else destino = conferirCaminho(c.caminho, 'gravar');
+      } catch (e) { res.resume(); resolve({ err: erroJSON(e) }); return; }
       const out = fs.createWriteStream(destino, { flags: c.acrescentar ? 'a' : 'w' });
       let bytes = 0;
       res.on('data', (d) => { bytes += d.length; });
@@ -589,12 +617,316 @@ function opHttpCorpo(c) {
 function infoPlugin() {
   const P = pastasArcano();
   const env = {};
-  for (const k of ['APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'SystemRoot', 'ProgramFiles', 'ProgramFiles(x86)', 'CODEX_HOME', 'LANG']) if (process.env[k]) env[k] = process.env[k];
+  for (const k of ['APPDATA', 'LOCALAPPDATA', 'USERPROFILE', 'HOME', 'SystemRoot', 'ProgramFiles', 'ProgramFiles(x86)', 'ProgramW6432', 'CODEX_HOME', 'LANG', 'PATH', 'Path', 'USERNAME', 'USER', 'COMPUTERNAME']) if (process.env[k]) env[k] = process.env[k];
   return {
     platform: process.platform, arch: process.arch, version: process.version, versions: { node: process.versions.node },
     env, home: os.homedir(), tmp: os.tmpdir(), hostname: os.hostname(), cpus: (os.cpus() || []).length || 2,
     sep: path.sep, delimiter: path.delimiter, pastas: P, conector: VERSAO,
   };
+}
+
+// ─── Codex: o plugin liga/desliga o bloco do Arcano no ~/.codex/config.toml. Só esse bloco pode mudar,
+// e só com servidor http em 127.0.0.1 (um servidor de "comando" ali rodaria qualquer programa).
+function pastaCodexConector() { return process.env.CODEX_HOME || path.join(os.homedir(), '.codex'); }
+function ehConfigCodex(p) {
+  try { const n = normal(p), alvo = path.join(pastaCodexConector(), 'config.toml'); return WIN ? n.toLowerCase() === alvo.toLowerCase() : n === alvo; } catch (e) { return false; }
+}
+const RE_BLOCO_CODEX = /# >>> arcano[^\n]*\n[\s\S]*?# <<< arcano[^\n]*\n?/g;
+function semBlocosArcano(t) { return String(t || '').replace(RE_BLOCO_CODEX, '').replace(/\s+$/, ''); }
+function gravarConfigCodex(arq, novo) {
+  let atual = '';
+  try { atual = fs.readFileSync(arq, 'utf8'); } catch (e) { /* ainda não existe */ }
+  if (semBlocosArcano(novo) !== semBlocosArcano(atual)) throw codigoErro('EACCES', 'só o bloco do Arcano pode mudar no config.toml do Codex');
+  const blocos = String(novo).match(RE_BLOCO_CODEX) || [];
+  const linhaOk = /^(# (>>>|<<<) arcano.*|\[mcp_servers\.arcano_(motion|design)\]|url = "http:\/\/127\.0\.0\.1:\d{1,5}\/mcp"|bearer_token_env_var = "[A-Z_]+"|enabled = (true|false)|required = (true|false)|default_tools_approval_mode = "approve"|startup_timeout_sec = \d+|tool_timeout_sec = \d+|)$/;
+  for (const b of blocos) for (const l of b.split('\n')) if (!linhaOk.test(l.trim())) throw codigoErro('EACCES', 'linha não permitida no bloco do Codex: ' + l.slice(0, 60));
+  fs.mkdirSync(path.dirname(arq), { recursive: true });
+  fs.writeFileSync(arq, novo, 'utf8');
+}
+
+// ─── Eventos para o navegador (saída dos programas, pedidos ao servidor MCP do plugin) ───
+const sessoesPlugin = new Map(); // sid → { fila, acordar }
+function sessaoPlugin(sid) { let s = sessoesPlugin.get(sid); if (!s) { s = { fila: [], acordar: null }; sessoesPlugin.set(sid, s); } return s; }
+function avisar(sid, ev) { const s = sessaoPlugin(sid); s.fila.push(ev); if (s.acordar) { const f = s.acordar; s.acordar = null; f(); } }
+
+// ─── Programas da LISTA ───
+// Nada de comando livre: cada programa tem regra do executável e dos argumentos.
+const procsPlugin = new Map(); // id → ChildProcess
+let seqProc = 0;
+function base(p) { return path.basename(String(p || '')).toLowerCase(); }
+function foraDasPastasGravaveis(p) {
+  const P = pastasArcano(), n = real(normal(p));
+  if (P.escrita.some((d) => dentro(n, d)) || dentro(n, P.tmp) || dentro(n, path.join(os.homedir(), 'Downloads'))) return false;
+  return true;
+}
+function emPastaArcano(p) { try { conferirCaminho(p, 'ler'); return true; } catch (e) { return false; } }
+function exigir(cond, msg) { if (!cond) throw codigoErro('EACCES', 'programa ou argumento não permitido: ' + msg); }
+
+function regraClaude(args) {
+  if (args.length === 1 && args[0] === '--version') return;
+  if (args.length === 1 && args[0] === 'update') return;
+  if (args.length === 2 && args[0] === 'auth' && (args[1] === 'status' || args[1] === 'logout')) return;
+  exigir(args[0] === '-p', 'claude ' + args[0]);
+  const comValor = { '--output-format': /^stream-json$/, '--mcp-config': 'arquivo-mcp', '--tools': /^(|Read)$/, '--allowedTools': /^(mcp__arcano__\*|Read)$/,
+    '--permission-mode': /^dontAsk$/, '--append-system-prompt-file': 'arquivo', '--setting-sources': /^user$/, '--max-turns': /^\d{1,3}$/,
+    '--resume': /^[\w-]{6,80}$/, '--model': /^[\w.\-\[\]]{1,60}$/, '--effort': /^(low|medium|high|xhigh|max)$/, '--input-format': /^(text|stream-json)$/ };
+  const semValor = ['-p', '--verbose', '--strict-mcp-config', '--no-session-persistence', '--include-partial-messages'];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (semValor.includes(a)) continue;
+    if (a === '--disallowedTools') { while (i + 1 < args.length && /^mcp__arcano__\w+$/.test(args[i + 1])) i++; continue; }
+    const r = comValor[a];
+    exigir(r, 'claude ' + a);
+    const v = args[++i];
+    exigir(v !== undefined, 'claude ' + a + ' sem valor');
+    if (r === 'arquivo') exigir(emPastaArcano(v), 'claude ' + a);
+    else if (r === 'arquivo-mcp') conferirMCP(v);
+    else exigir(r.test(v), 'claude ' + a + ' ' + v);
+  }
+}
+// O arquivo de MCP só pode apontar para o servidor do plugin em 127.0.0.1 (http). Comando ali rodaria qualquer coisa.
+function conferirMCP(arq) {
+  exigir(emPastaArcano(arq), 'mcp-config fora das pastas do Arcano');
+  let j; try { j = JSON.parse(fs.readFileSync(conferirCaminho(arq, 'ler'), 'utf8')); } catch (e) { exigir(false, 'mcp-config inválido'); }
+  const srv = (j && j.mcpServers) || {};
+  for (const k of Object.keys(srv)) {
+    const s = srv[k] || {};
+    exigir(s.type === 'http' && /^http:\/\/127\.0\.0\.1:\d{1,5}\/mcp$/.test(String(s.url || '')) && !s.command, 'servidor MCP ' + k);
+  }
+}
+function regraCodex(args) {
+  if (args.length === 1 && args[0] === '--version') return;
+  if (args.length === 2 && args[0] === 'login' && args[1] === 'status') return;
+  exigir(args[0] === 'exec', 'codex ' + args[0]);
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (['--json', '--skip-git-repo-check', '-', 'resume'].includes(a)) continue;
+    if (a === '--sandbox') { exigir(args[++i] === 'read-only', 'codex sandbox'); continue; }
+    if (a === '-m') { exigir(/^[\w.\-]{1,60}$/.test(args[++i] || ''), 'codex -m'); continue; }
+    if (a === '-c') { exigir(/^model_reasoning_effort=(minimal|low|medium|high|xhigh)$/.test(args[++i] || ''), 'codex -c'); continue; }
+    if (a === '--image') { String(args[++i] || '').split(',').forEach((f) => exigir(emPastaArcano(f), 'codex imagem')); continue; }
+    if (args[i - 1] === 'resume' && /^[\w-]{6,80}$/.test(a)) continue;
+    exigir(false, 'codex ' + a);
+  }
+}
+function regraYtdlp(args) {
+  if (args.length === 1 && args[0] === '-U') return;
+  const semValor = ['--no-playlist', '--quiet', '--progress', '--newline', '--no-mtime', '--no-warnings', '--no-part'];
+  const comValor = { '-S': /^[\w:,.]+$/, '--merge-output-format': /^(mp4|mkv|mov)$/, '--match-filter': /^duration<=\?\d+$/, '--max-filesize': /^\d+[KMG]?$/,
+    '--cookies-from-browser': /^(chrome|edge|firefox|safari)$/, '-f': /^[\w+\/\[\]<>=:.-]+$/ };
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (semValor.includes(a)) continue;
+    if (a === '-o') { const v = args[++i] || ''; exigir(emPastaArcano(v.replace(/%\([^)]*\)s/g, 'x')), 'yt-dlp -o'); continue; }
+    if (comValor[a]) { exigir(comValor[a].test(args[++i] || ''), 'yt-dlp ' + a); continue; }
+    if (i === args.length - 1 && /^https?:\/\/[^\s]+$/.test(a)) continue; // o link
+    exigir(false, 'yt-dlp ' + a);
+  }
+}
+function regraOuvido(args) {
+  for (const a of args) {
+    if (/^--(whisper-language|whisper-task|num-threads)=[\w.-]+$/.test(a)) continue;
+    const m = /^--(whisper-encoder|whisper-decoder|tokens)=(.+)$/.exec(a);
+    if (m) { exigir(emPastaArcano(m[2]), 'ouvido ' + m[1]); continue; }
+    exigir(!a.startsWith('-') && emPastaArcano(a), 'ouvido ' + a.slice(0, 40));
+  }
+}
+const FLAGS_NAVEGADOR = ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-sync', '--mute-audio',
+  '--hide-scrollbars', '--disable-blink-features=AutomationControlled', '--dump-dom'];
+function regraNavegador(args) {
+  args.forEach((a, i) => {
+    if (FLAGS_NAVEGADOR.includes(a) || /^--lang=[\w-]+$/.test(a) || /^--window-size=\d+,\d+$/.test(a) || /^--virtual-time-budget=\d+$/.test(a) || /^--user-agent=[^"]{1,300}$/.test(a)) return;
+    const m = /^--user-data-dir=(.+)$/.exec(a);
+    if (m) { exigir(emPastaArcano(m[1]), 'navegador perfil'); return; }
+    exigir(i === args.length - 1 && /^https?:\/\/[^\s]+$/.test(a), 'navegador ' + a.slice(0, 60));
+  });
+}
+function classificar(exe, args) {
+  const b = base(exe), P = pastasArcano();
+  if (/^claude(\.exe|\.cmd)?$/.test(b)) { exigir(foraDasPastasGravaveis(exe), 'claude em pasta gravável'); regraClaude(args); return 'claude'; }
+  if (/^codex(\.exe|\.cmd)?$/.test(b)) { exigir(foraDasPastasGravaveis(exe), 'codex em pasta gravável'); regraCodex(args); return 'codex'; }
+  if (/^node(\.exe)?$/.test(b)) { exigir(args.length === 1 && args[0] === '--version', 'node'); return 'node'; }
+  if (/^yt-dlp(\.exe|_macos)?$/.test(b)) { exigir(dentro(real(normal(exe)), path.join(P.comum, 'bin')), 'yt-dlp fora da pasta'); regraYtdlp(args); return 'ytdlp'; }
+  if (/^sherpa-onnx-offline(\.exe)?$/.test(b)) { exigir(dentro(real(normal(exe)), path.join(P.comum, 'ouvido')), 'ouvido fora da pasta'); regraOuvido(args); return 'ouvido'; }
+  if (/^(chrome\.exe|msedge\.exe|google chrome|microsoft edge|chromium|google-chrome)$/.test(b)) { exigir(foraDasPastasGravaveis(exe), 'navegador'); regraNavegador(args); return 'navegador'; }
+  exigir(false, b);
+}
+// Ambiente do conector (o navegador não manda variáveis): sem chave de API, com as pastas do Node/npm no PATH.
+function ambienteProgramas(tipo) {
+  const env = ambienteLimpo();
+  const extra = [];
+  if (WIN) { if (env.ProgramFiles) extra.push(path.join(env.ProgramFiles, 'nodejs')); if (env.APPDATA) extra.push(path.join(env.APPDATA, 'npm')); extra.push(path.join(os.homedir(), '.local', 'bin')); }
+  else extra.push('/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin'));
+  const k = Object.keys(env).find((x) => x.toLowerCase() === 'path') || 'PATH';
+  env[k] = [env[k] || ''].concat(extra).join(path.delimiter);
+  if (tipo === 'codex' && process.env.ARCANO_CODEX_TOKEN) env.ARCANO_CODEX_TOKEN = process.env.ARCANO_CODEX_TOKEN;
+  return env;
+}
+function iniciarProg(c, sid) {
+  const exe = String(c.exe || ''), args = (c.args || []).map(String);
+  const tipo = classificar(exe, args);
+  let cwd = c.cwd && emPastaArcano(c.cwd) ? c.cwd : pastasArcano().comum;
+  try { fs.mkdirSync(cwd, { recursive: true }); } catch (e) { cwd = os.tmpdir(); }
+  const env = ambienteProgramas(tipo);
+  if (c.envExtra && typeof c.envExtra === 'object') {
+    // só as variáveis que o plugin passa de propósito (token do MCP do Codex, biblioteca do ouvido no Mac)
+    for (const k of Object.keys(c.envExtra)) if (/^(ARCANO_[A-Z_]+|DYLD_LIBRARY_PATH)$/.test(k)) env[k] = String(c.envExtra[k]);
+  }
+  const usarShell = WIN && /\.(cmd|bat)$/i.test(exe);
+  const filho = usarShell
+    ? cp.spawn(aspas(exe) + ' ' + args.map(aspas).join(' '), [], { cwd, env, windowsHide: true, shell: true })
+    : cp.spawn(exe, args, { cwd, env, windowsHide: true });
+  const id = 'p' + (++seqProc);
+  procsPlugin.set(id, filho);
+  const ev = (o) => avisar(sid, Object.assign({ id }, o));
+  if (filho.stdout) filho.stdout.on('data', (d) => ev({ t: 'stdout', d: d.toString('base64') }));
+  if (filho.stderr) filho.stderr.on('data', (d) => ev({ t: 'stderr', d: d.toString('base64') }));
+  if (filho.stdin) filho.stdin.on('error', () => {});
+  filho.on('error', (e) => ev({ t: 'error', e: erroJSON(e) }));
+  filho.on('exit', (code, sinal) => ev({ t: 'exit', code, sinal }));
+  filho.on('close', (code, sinal) => { ev({ t: 'close', code, sinal }); setTimeout(() => procsPlugin.delete(id), 60000); });
+  log('programa', tipo, base(exe), id);
+  return { id, pid: filho.pid, tipo };
+}
+function matarArvoreConector(filho) {
+  try {
+    if (WIN && filho.pid) cp.execFile('taskkill', ['/pid', String(filho.pid), '/T', '/F'], { windowsHide: true }, () => {});
+    else filho.kill('SIGTERM');
+  } catch (e) { /* já saiu */ }
+}
+
+// ─── Operações fixas (o conector tem o próprio script; o navegador só passa parâmetros conferidos) ───
+const SCRIPT_MIC = [
+  'param([string]$saida, [string]$stop, [int]$max)',
+  'Add-Type -TypeDefinition \'using System; using System.Text; using System.Runtime.InteropServices; public class ArcMci { [DllImport("winmm.dll", CharSet = CharSet.Unicode)] public static extern int mciSendString(string c, StringBuilder r, int l, IntPtr h); }\'',
+  '$e = [ArcMci]::mciSendString("open new type waveaudio alias arcrec", $null, 0, [IntPtr]::Zero)',
+  'if ($e -ne 0) { Write-Output "ERRO_ABRIR $e"; exit 2 }',
+  '[void][ArcMci]::mciSendString("set arcrec bitspersample 16 channels 1 samplespersec 24000 alignment 2 bytespersec 48000", $null, 0, [IntPtr]::Zero)',
+  '$e = [ArcMci]::mciSendString("record arcrec", $null, 0, [IntPtr]::Zero)',
+  'if ($e -ne 0) { Write-Output "ERRO_GRAVAR $e"; [void][ArcMci]::mciSendString("close arcrec", $null, 0, [IntPtr]::Zero); exit 3 }',
+  'Write-Output "GRAVANDO"',
+  '$ini = Get-Date',
+  'while (-not (Test-Path $stop) -and ((Get-Date) - $ini).TotalSeconds -lt $max) { Start-Sleep -Milliseconds 100 }',
+  '[void][ArcMci]::mciSendString("stop arcrec", $null, 0, [IntPtr]::Zero)',
+  '$e = [ArcMci]::mciSendString(\'save arcrec "\' + $saida + \'"\', $null, 0, [IntPtr]::Zero)',
+  '[void][ArcMci]::mciSendString("close arcrec", $null, 0, [IntPtr]::Zero)',
+  'if ($e -ne 0) { Write-Output "ERRO_SALVAR $e"; exit 4 }',
+  'Write-Output "OK"',
+].join('\r\n');
+function opMicrofone(c, sid) {
+  exigir(WIN, 'microfone (só Windows)');
+  const saida = conferirCaminho(c.saida, 'gravar'), stop = conferirCaminho(c.stop, 'gravar');
+  const max = Math.max(1, Math.min(600, Number(c.max) || 120));
+  const ps1 = path.join(pastaConfig(), 'gravar-microfone.ps1');
+  fs.writeFileSync(ps1, '\ufeff' + SCRIPT_MIC, 'utf8');
+  const filho = cp.spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '-saida', saida, '-stop', stop, '-max', String(max)], { windowsHide: true });
+  const id = 'p' + (++seqProc);
+  procsPlugin.set(id, filho);
+  const ev = (o) => avisar(sid, Object.assign({ id }, o));
+  filho.stdout.on('data', (d) => ev({ t: 'stdout', d: d.toString('base64') }));
+  filho.stderr.on('data', (d) => ev({ t: 'stderr', d: d.toString('base64') }));
+  filho.on('error', (e) => ev({ t: 'error', e: erroJSON(e) }));
+  filho.on('close', (code) => { ev({ t: 'exit', code }); ev({ t: 'close', code }); });
+  return { id, pid: filho.pid };
+}
+function opExtrair(c) {
+  const arquivo = normal(c.arquivo), pasta = normal(c.pasta), P = pastasArcano();
+  const ok = (x) => emPastaArcano(x) || dentro(real(x), path.join(P.comum, 'ouvido')) || dentro(real(x), path.join(P.comum, 'bin'));
+  exigir(ok(arquivo) && ok(pasta), 'tar');
+  return new Promise((resolve) => {
+    const tar = WIN ? path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar';
+    cp.execFile(tar, ['-xjf', arquivo, '-C', pasta], { windowsHide: true, timeout: 600000, maxBuffer: 4 * 1048576 },
+      (e, so, se) => resolve(e ? { err: erroJSON(e), stderr: String(se || '') } : { ok: true }));
+  });
+}
+function opZipar(c) {
+  const pasta = conferirCaminho(c.pasta, 'ler'), zip = conferirCaminho(c.zip, 'gravar');
+  return new Promise((resolve) => {
+    const cb = (e) => resolve(e ? { err: erroJSON(e) } : { ok: true });
+    if (WIN) cp.execFile('powershell', ['-NoProfile', '-Command', 'Compress-Archive', '-Path', path.join(pasta, '*'), '-DestinationPath', zip, '-Force'], { timeout: 300000, windowsHide: true }, cb);
+    else cp.execFile('zip', ['-q', '-r', zip, '.'], { cwd: pasta, timeout: 300000 }, cb);
+  });
+}
+async function opAcharPrograma(c) {
+  const nome = c.nome === 'codex' ? 'codex' : 'claude';
+  const cmd = WIN ? 'where' : '/bin/zsh', args = WIN ? [nome] : ['-lc', (c.todos ? 'which -a ' : 'command -v ') + nome];
+  return new Promise((resolve) => cp.execFile(cmd, args, { timeout: 8000, windowsHide: true, env: ambienteProgramas(nome) }, (e, so) => resolve({ saida: String(so || '') })));
+}
+// Janelas de instalação/login: o conector tem os próprios comandos (o navegador só diz qual).
+function opJanela(c) {
+  const exe = c.exe ? String(c.exe) : '';
+  if (exe) exigir(foraDasPastasGravaveis(exe) && /^(claude|codex)(\.exe|\.cmd)?$/.test(base(exe)), 'janela');
+  const q = (x) => '"' + x.replace(/"/g, '') + '"';
+  const W = {
+    instalarClaude: ['title Instalando o Claude Code', 'powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; irm https://claude.ai/install.ps1 | iex"',
+      'if not exist "%USERPROFILE%\\.local\\bin\\claude.exe" ( winget install -e --id Anthropic.ClaudeCode --accept-source-agreements --accept-package-agreements )', 'echo.', 'echo Terminou. Pode fechar esta janela.', 'pause'],
+    loginClaude: ['title Login no Claude', 'set ANTHROPIC_API_KEY=', 'echo Vai abrir o navegador. Entre com a conta do seu plano Pro ou Max e autorize.', q(exe) + ' auth login', 'echo.', 'echo Se deu certo, pode fechar esta janela.', 'pause'],
+    instalarCodex: ['title Instalando o Codex', 'set "PATH=%PATH%;%ProgramFiles%\\nodejs;%APPDATA%\\npm"', 'where node >nul 2>nul || (winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements)',
+      'set "PATH=%PATH%;%ProgramFiles%\\nodejs;%APPDATA%\\npm"', 'call npm install -g @openai/codex', 'echo.', 'echo Terminou. Pode fechar esta janela.', 'pause'],
+    loginCodex: ['title Login no Codex', 'set "PATH=%PATH%;%ProgramFiles%\\nodejs;%APPDATA%\\npm"', 'call ' + q(exe) + ' login', 'echo.', 'echo Se deu certo, pode fechar esta janela.', 'pause'],
+  };
+  const M = {
+    instalarClaude: 'curl -fsSL https://claude.ai/install.sh | bash',
+    loginClaude: q(exe) + ' auth login',
+    instalarCodex: 'export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; if command -v npm >/dev/null; then npm install -g @openai/codex; elif command -v brew >/dev/null; then brew install --cask codex; else open https://nodejs.org/; fi',
+    loginCodex: q(exe) + ' login',
+  };
+  exigir(W[c.tipo], 'janela ' + c.tipo);
+  exigir(!/^login/.test(c.tipo) || exe, 'janela sem programa');
+  abrirJanela(['@echo off', 'chcp 65001 >nul'].concat(W[c.tipo]), M[c.tipo]);
+  return true;
+}
+
+// ─── Servidor do plugin (o MCP que o Claude/Codex chamam): o conector escuta e repassa ao navegador ───
+const servidoresPlugin = new Map();
+const pedidosPlugin = new Map();
+let seqSrv = 0;
+function opServidor(sid) {
+  return new Promise((resolve) => {
+    const id = 's' + (++seqSrv);
+    const srv = http.createServer((req, res) => {
+      const rid = 'r' + (++seqSrv);
+      const partes = [];
+      req.on('data', (d) => partes.push(d));
+      req.on('end', () => {
+        pedidosPlugin.set(rid, res);
+        res.on('close', () => pedidosPlugin.delete(rid));
+        avisar(sid, { t: 'req', id, rid, method: req.method, url: req.url, headers: req.headers, corpo: Buffer.concat(partes).toString('base64') });
+      });
+    });
+    srv.on('error', (e) => resolve({ err: erroJSON(e) }));
+    srv.listen(0, '127.0.0.1', () => { servidoresPlugin.set(id, srv); resolve({ id, porta: srv.address().port }); });
+  });
+}
+
+async function tratarPlugin2(url, json, c) {
+  const sid = String(c.sid || 'x');
+  const tentar = async (fn) => { try { json(200, { ok: true, v: cod(await fn()) }); } catch (e) { json(200, { ok: false, e: erroJSON(e) }); } };
+  switch (url) {
+    case '/plugin/proc': await tentar(() => iniciarProg(c, sid)); return true;
+    case '/plugin/proc/stdin': await tentar(() => { const p = procsPlugin.get(c.id); if (p && p.stdin) { if (c.d) p.stdin.write(Buffer.from(c.d, 'base64')); if (c.fim) p.stdin.end(); } return !!p; }); return true;
+    case '/plugin/proc/matar': await tentar(() => { const p = procsPlugin.get(c.id); if (p) { if (c.arvore) matarArvoreConector(p); else try { p.kill(c.sinal || undefined); } catch (e) { /* já saiu */ } } return !!p; }); return true;
+    case '/plugin/proc/matarPid': await tentar(() => { for (const p of procsPlugin.values()) if (p.pid === Number(c.pid)) { matarArvoreConector(p); return true; } return false; }); return true;
+    case '/plugin/microfone': await tentar(() => opMicrofone(c, sid)); return true;
+    case '/plugin/extrair': await tentar(() => opExtrair(c)); return true;
+    case '/plugin/zipar': await tentar(() => opZipar(c)); return true;
+    case '/plugin/achar': await tentar(() => opAcharPrograma(c)); return true;
+    case '/plugin/janela': await tentar(() => opJanela(c)); return true;
+    case '/plugin/servidor': await tentar(() => opServidor(sid)); return true;
+    case '/plugin/servidor/fechar': await tentar(() => { const s = servidoresPlugin.get(c.id); if (s) { s.close(); servidoresPlugin.delete(c.id); } return true; }); return true;
+    case '/plugin/servidor/resposta': await tentar(() => {
+      const res = pedidosPlugin.get(c.rid);
+      if (res) { pedidosPlugin.delete(c.rid); res.writeHead(c.status || 200, c.headers || {}); res.end(c.corpo ? Buffer.from(c.corpo, 'base64') : undefined); }
+      return !!res;
+    }); return true;
+    case '/plugin/eventos': {
+      const s = sessaoPlugin(sid);
+      if (!s.fila.length) await new Promise((r) => { s.acordar = r; setTimeout(r, 25000); });
+      const fila = s.fila; s.fila = [];
+      json(200, { ok: true, eventos: fila }); return true;
+    }
+    default: return false;
+  }
 }
 
 // Rotas /plugin/* (POST, corpo JSON). Devolve true se tratou.
@@ -608,7 +940,7 @@ async function tratarPlugin(url, json, texto) {
     case '/plugin/path': sync(() => opCaminho(c)); return true;
     case '/plugin/zlib': sync(() => opZlib(c)); return true;
     case '/plugin/hash': sync(() => opHash(c)); return true;
-    case '/plugin/janela': sync(() => janelaArquivos(c.a)); return true;
+    case '/plugin/escolher': sync(() => janelaArquivos(c.a)); return true;
     case '/plugin/maquina': sync(idMaquina); return true;
     case '/plugin/mostrar': sync(() => mostrarNaPasta(c.caminho)); return true;
     case '/plugin/dns': {
@@ -617,7 +949,7 @@ async function tratarPlugin(url, json, texto) {
     }
     case '/plugin/http': json(200, await opHttp(c)); return true;
     case '/plugin/http/corpo': json(200, await opHttpCorpo(c)); return true;
-    default: return false;
+    default: return tratarPlugin2(url, json, c);
   }
 }
 

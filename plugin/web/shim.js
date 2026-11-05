@@ -328,25 +328,219 @@
       createServer: function (h) { return new ServidorRemoto(h); }
     };
   }
-  // Servidor HTTP do plugin (o MCP do Claude): vem na próxima etapa, pelo conector.
-  function ServidorRemoto(h) { Emissor.call(this); this._h = h; }
+  // ─────────────────────────── eventos do conector (programas, servidor) ───────────────────────────
+  var SID = 's' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  var ouvintes = {}, escutando = false;
+  function escutarEventos() {
+    if (escutando) { return; }
+    escutando = true;
+    (function ciclo() {
+      assincrono('/plugin/eventos', { sid: SID }).then(function (r) {
+        ((r && r.eventos) || []).forEach(function (ev) { var f = ouvintes[ev.id]; if (f) { try { f(ev); } catch (e) { console.error('[Arcano] evento', e); } } });
+        ciclo();
+      }, function () { setTimeout(ciclo, 1500); });
+    })();
+  }
+  function op(rota, corpo) { corpo = corpo || {}; corpo.sid = SID; return assincrono(rota, corpo).then(function (r) { if (!r.ok) { throw erroNode(r.e || {}); } return dec(r.v); }); }
+
+  // ─────────────────────────── servidor HTTP do plugin (o MCP do Claude/Codex) ───────────────────────────
+  // O conector escuta no PC (127.0.0.1) e repassa cada pedido para cá; a resposta volta pelo conector.
+  function ServidorRemoto(h) { Emissor.call(this); if (h) { this.on('request', h); } this._porta = 0; this._id = null; }
   herda(ServidorRemoto);
-  ServidorRemoto.prototype.listen = function () { var s = this; depois(function () { s.emit('error', new Error('O chat ainda não está ligado nesta versão do navegador.')); }); return this; };
-  ServidorRemoto.prototype.close = function (cb) { if (cb) { depois(cb); } };
-  ServidorRemoto.prototype.address = function () { return { port: 0 }; };
+  ServidorRemoto.prototype.listen = function () {
+    var s = this, cb = null;
+    for (var i = 0; i < arguments.length; i++) { if (typeof arguments[i] === 'function') { cb = arguments[i]; } }
+    if (cb) { this.once('listening', cb); }
+    escutarEventos();
+    op('/plugin/servidor', {}).then(function (r) {
+      if (r.err) { s.emit('error', erroNode(r.err)); return; }
+      s._id = r.id; s._porta = r.porta;
+      ouvintes[r.id] = function (ev) { if (ev.t === 'req') { s._pedido(ev); } };
+      s.listening = true;
+      s.emit('listening');
+    }, function (e) { s.emit('error', e); });
+    return this;
+  };
+  ServidorRemoto.prototype._pedido = function (ev) {
+    var req = new Emissor(), res = new Emissor(), partes = [], status = 200, cab = {};
+    req.method = ev.method; req.url = ev.url; req.headers = ev.headers || {}; req._enc = null;
+    req.setEncoding = function (e) { req._enc = e; return req; };
+    req.socket = { remoteAddress: '127.0.0.1' };
+    res.headersSent = false; res.statusCode = 200;
+    res.setHeader = function (k, v) { cab[String(k).toLowerCase()] = v; };
+    res.getHeader = function (k) { return cab[String(k).toLowerCase()]; };
+    res.writeHead = function (st, a, b) { status = st; res.statusCode = st; var h = typeof a === 'object' ? a : b; if (h) { Object.keys(h).forEach(function (k) { cab[k] = h[k]; }); } res.headersSent = true; return res; };
+    res.write = function (c, enc) { partes.push(Buffer.isBuffer(c) ? c : Buffer.from(String(c), enc || 'utf8')); return true; };
+    res.end = function (c, enc) {
+      if (c && typeof c !== 'function') { res.write(c, enc); }
+      if (res._fim) { return; } res._fim = true;
+      op('/plugin/servidor/resposta', { rid: ev.rid, status: status, headers: cab, corpo: partes.length ? Buffer.concat(partes).toString('base64') : null }).catch(function () {});
+      res.emit('finish');
+    };
+    this.emit('request', req, res);
+    depois(function () {
+      var b = Buffer.from(ev.corpo || '', 'base64');
+      if (b.length) { req.emit('data', req._enc ? b.toString(req._enc) : b); }
+      req.emit('end');
+    });
+  };
+  ServidorRemoto.prototype.close = function (cb) { if (this._id) { op('/plugin/servidor/fechar', { id: this._id }).catch(function () {}); delete ouvintes[this._id]; } this.listening = false; if (cb) { depois(cb); } return this; };
+  ServidorRemoto.prototype.address = function () { return { port: this._porta, address: '127.0.0.1', family: 'IPv4' }; };
+  ServidorRemoto.prototype.unref = ServidorRemoto.prototype.ref = function () { return this; };
 
   // ─────────────────────────── child_process ───────────────────────────
-  // Só o que tem operação segura no conector. O resto responde "não disponível" (na próxima etapa vem pela lista de programas).
-  function naoDisponivel(oQue) { var e = new Error('Ainda não disponível no navegador: ' + oQue); e.code = 'ENOSYS'; return e; }
-  function Filho() { Emissor.call(this); this.stdout = new Emissor(); this.stderr = new Emissor(); this.stdin = { write: function () { return true; }, end: function () {}, on: function () {} }; this.pid = 0;
-    this.stdout.setEncoding = this.stderr.setEncoding = function () {}; }
+  // Os programas da LISTA rodam no conector (ele confere programa e argumentos). Comandos de sistema que o plugin usa
+  // viram operações fixas do conector (procurar o Claude, abrir janela de instalação/login, gravar o microfone, descompactar…).
+  function naoDisponivel(oQue) { var e = new Error('Não disponível no navegador: ' + oQue); e.code = 'ENOSYS'; return e; }
+  function Fluxo() { Emissor.call(this); this._enc = null; }
+  herda(Fluxo);
+  Fluxo.prototype.setEncoding = function (e) { this._enc = e; return this; };
+  Fluxo.prototype.pipe = function (d) { this.on('data', function (x) { d.write(x); }); return d; };
+  Fluxo.prototype.resume = Fluxo.prototype.pause = function () { return this; };
+  Fluxo.prototype._dado = function (b) { this.emit('data', this._enc ? b.toString(this._enc) : b); };
+  function Filho() {
+    Emissor.call(this);
+    var s = this;
+    this.stdout = new Fluxo(); this.stderr = new Fluxo(); this.pid = 0; this.killed = false; this.exitCode = null; this._id = null; this._fila = [];
+    this.stdin = {
+      writable: true,
+      write: function (d, enc) { s._stdin({ d: (Buffer.isBuffer(d) ? d : Buffer.from(String(d), enc || 'utf8')).toString('base64') }); return true; },
+      end: function (d, enc) { if (d) { this.write(d, enc); } s._stdin({ fim: true }); },
+      on: function () { return this; }, once: function () { return this; }, setEncoding: function () {}
+    };
+  }
   herda(Filho);
-  Filho.prototype.kill = function () { return true; };
-  Filho.prototype.unref = function () {};
-  function exec(cmd, op, cb) {
-    if (typeof op === 'function') { cb = op; op = {}; }
-    var f = new Filho(), c = String(cmd);
-    var fim = function (e, so) { if (cb) { cb(e, so || '', ''); } f.emit('exit', e ? 1 : 0); f.emit('close', e ? 1 : 0); };
+  Filho.prototype._stdin = function (o) { if (!this._id) { this._fila.push(o); return; } o.id = this._id; op('/plugin/proc/stdin', o).catch(function () {}); };
+  Filho.prototype.kill = function (sinal) { this.killed = true; if (this._id) { op('/plugin/proc/matar', { id: this._id, sinal: sinal || null }).catch(function () {}); } else { this._matarAoIniciar = true; } return true; };
+  Filho.prototype.unref = Filho.prototype.ref = function () { return this; };
+  Filho.prototype._ligar = function (r) {
+    var s = this;
+    s._id = r.id; s.pid = r.pid || 0;
+    ouvintes[r.id] = function (ev) {
+      if (ev.t === 'stdout') { s.stdout._dado(Buffer.from(ev.d, 'base64')); }
+      else if (ev.t === 'stderr') { s.stderr._dado(Buffer.from(ev.d, 'base64')); }
+      else if (ev.t === 'error') { s.emit('error', erroNode(ev.e || {})); }
+      else if (ev.t === 'exit') { s.exitCode = ev.code; s.emit('exit', ev.code, ev.sinal || null); }
+      else if (ev.t === 'close') { s.stdout.emit('end'); s.stderr.emit('end'); s.emit('close', ev.code, ev.sinal || null); delete ouvintes[r.id]; }
+    };
+    s._fila.forEach(function (o) { s._stdin(o); }); s._fila = [];
+    if (s._matarAoIniciar) { s.kill(); }
+    s.emit('spawn');
+  };
+  function falhar(f, e) { depois(function () { f.emit('error', e); f.emit('close', -1, null); }); return f; }
+  function remoto(rota, corpo) {
+    var f = new Filho();
+    escutarEventos();
+    op(rota, corpo).then(function (r) { f._ligar(r); }, function (e) { falhar(f, e); });
+    return f;
+  }
+  // "aspas" do plugin: "C:\a b\claude.cmd" "-p" "--x" → ['C:\a b\claude.cmd', '-p', '--x']
+  function separarAspas(t) { var l = [], re = /"((?:[^"\\]|\\.)*)"|(\S+)/g, m; while ((m = re.exec(t))) { l.push(m[1] !== undefined ? m[1].replace(/\\"/g, '"') : m[2]); } return l; }
+  function soVars(env) { var o = {}; if (env) { Object.keys(env).forEach(function (k) { if (/^(ARCANO_[A-Z_]+|DYLD_LIBRARY_PATH)$/.test(k)) { o[k] = String(env[k]); } }); } return o; }
+  function ehCurl(exe) { return /(^|[\\/])curl(\.exe)?$/i.test(String(exe)); }
+
+  // curl (o plugin usa como reserva de rede e para baixar): vira pedido HTTP pelo conector
+  function curl(args) {
+    var f = new Filho(), url = null, metodo = 'GET', cab = {}, saidaArq = null, formato = '', dadosStdin = false, partes = [];
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (a === '-X') { metodo = args[++i]; } else if (a === '-H') { var h = args[++i], k = h.indexOf(':'); cab[h.slice(0, k).trim()] = h.slice(k + 1).trim(); }
+      else if (a === '-o') { saidaArq = args[++i]; } else if (a === '-w') { formato = args[++i]; } else if (a === '--data-binary') { dadosStdin = args[++i] === '@-'; }
+      else if (a === '--max-time' || a === '--proxy' || a === '--resolve') { i++; } else if (/^https?:/.test(a)) { url = a; }
+    }
+    f.stdin = { write: function (d) { partes.push(Buffer.from(d)); return true; }, end: function (d) { if (d) { partes.push(Buffer.from(d)); } enviar(); }, on: function () { return this; } };
+    var enviado = false;
+    function enviar() {
+      if (enviado) { return; } enviado = true;
+      var u = new URL(url), corpo = partes.length ? Buffer.concat(partes) : null;
+      var req = clienteHttp(u.protocol).request({ hostname: u.hostname, port: u.port, path: u.pathname + u.search, method: metodo, headers: cab }, function (res) {
+        var fimOk = function (corpoBuf) {
+          var w = formato.replace('%{http_code}', res.statusCode).replace('%{remote_ip}', '').replace('%{content_type}', res.headers['content-type'] || '').replace(/\\n/g, '\n');
+          if (corpoBuf) { f.stdout._dado(corpoBuf); }
+          f.stdout._dado(Buffer.from(w));
+          f.emit('exit', 0); f.emit('close', 0);
+        };
+        if (saidaArq) { res.pipe(fs.createWriteStream(saidaArq)).on('finish', function () { fimOk(null); }).on('error', function (e) { f.stderr._dado(Buffer.from(e.message)); f.emit('close', 23); }); }
+        else { var p = []; res.on('data', function (d) { p.push(Buffer.from(d)); }); res.on('end', function () { fimOk(Buffer.concat(p)); }); }
+      });
+      req.on('error', function (e) { f.stderr._dado(Buffer.from('curl: ' + e.message)); f.emit('exit', 6); f.emit('close', 6); });
+      if (corpo) { req.write(corpo); }
+      req.end();
+    }
+    if (!dadosStdin) { depois(enviar); }
+    return f;
+  }
+  function spawn(exe, args, opcoes) {
+    args = args || []; opcoes = opcoes || {};
+    if (opcoes.shell && !args.length) { var t = separarAspas(String(exe)); exe = t[0]; args = t.slice(1); }
+    var b = String(exe).split(/[\\/]/).pop().toLowerCase();
+    if (ehCurl(exe)) { return curl(args); }
+    if (/^powershell(\.exe)?$/.test(b) && args.indexOf('-File') >= 0 && args.indexOf('-saida') >= 0) {
+      return remoto('/plugin/microfone', { saida: args[args.indexOf('-saida') + 1], stop: args[args.indexOf('-stop') + 1], max: args[args.indexOf('-max') + 1] });
+    }
+    if (b === 'open' && args[0] === '-a') { return falhar(new Filho(), naoDisponivel('abrir o Photoshop pelo navegador')); }
+    return remoto('/plugin/proc', { exe: String(exe), args: args.map(String), cwd: opcoes.cwd || null, envExtra: soVars(opcoes.env) });
+  }
+  function juntarSaida(f, op2, cb) {
+    var so = [], se = [], timer = null;
+    f.stdout.on('data', function (d) { so.push(Buffer.from(d)); });
+    f.stderr.on('data', function (d) { se.push(Buffer.from(d)); });
+    if (op2 && op2.timeout) { timer = setTimeout(function () { f.kill(); }, op2.timeout); }
+    var feito = false;
+    function fim(code, e) {
+      if (feito) { return; } feito = true; clearTimeout(timer);
+      var enc = op2 && op2.encoding === 'buffer' ? null : 'utf8', a = Buffer.concat(so), b2 = Buffer.concat(se);
+      var o1 = enc ? a.toString(enc) : a, o2 = enc ? b2.toString(enc) : b2;
+      if (e || code) { var er = e || new Error('Command failed with code ' + code + ': ' + String(o2).slice(0, 300)); er.code = er.code || code; er.killed = f.killed; er.stdout = o1; er.stderr = o2; if (cb) { cb(er, o1, o2); } }
+      else if (cb) { cb(null, o1, o2); }
+    }
+    f.on('close', function (c) { fim(c); });
+    f.on('error', function (e) { fim(1, e); });
+    return f;
+  }
+  // Janela de instalação/login (o plugin escreve um .bat ou manda um comando ao Terminal do Mac):
+  // o conector abre a JANELA DELE, com os comandos dele. Daqui só vai qual é a janela.
+  function janelaDoTexto(t, cb) {
+    var f = new Filho(), tipo = null, exe = null, m;
+    if (/claude\.ai\/install/.test(t)) { tipo = 'instalarClaude'; }
+    else if (/@openai\/codex/.test(t)) { tipo = 'instalarCodex'; }
+    else if ((m = /"([^"]*claude[^"]*)"\s+auth login/i.exec(t))) { tipo = 'loginClaude'; exe = m[1]; }
+    else if ((m = /"([^"]*codex[^"]*)"\s+login/i.exec(t))) { tipo = 'loginCodex'; exe = m[1]; }
+    depois(function () {
+      if (!tipo) { var e = naoDisponivel('janela de comando'); if (cb) { cb(e, '', ''); } f.emit('close', 1); return; }
+      op('/plugin/janela', { tipo: tipo, exe: exe }).then(function () { if (cb) { cb(null, '', ''); } f.emit('close', 0); }, function (e) { if (cb) { cb(e, '', ''); } f.emit('close', 1); });
+    });
+    return f;
+  }
+  function execFile(arq, args, opcoes, cb) {
+    if (typeof args === 'function') { cb = args; args = []; opcoes = {}; }
+    if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+    args = args || []; opcoes = opcoes || {};
+    var b = String(arq).split(/[\\/]/).pop().toLowerCase();
+    if (b === 'open' || b === 'explorer') {
+      var f0 = new Filho();
+      depois(function () {
+        if (/^https?:/.test(args[0])) { window.open(args[0], '_blank', 'noopener'); }
+        else { try { sincrono('/plugin/mostrar', { caminho: args[0] === '-R' ? args[1] : args[0] }); } catch (e) { if (cb) { cb(e, '', ''); } return; } }
+        if (cb) { cb(null, '', ''); } f0.emit('close', 0);
+      });
+      return f0;
+    }
+    if (b === 'osascript') { return janelaDoTexto(args.join('\n'), cb); }
+    if (/^tar(\.exe)?$/.test(b) && args[0] === '-xjf') {
+      var f1 = new Filho();
+      op('/plugin/extrair', { arquivo: args[1], pasta: args[3] }).then(function (r) {
+        if (r && r.err) { var e = erroNode(r.err); if (cb) { cb(e, '', r.stderr || ''); } f1.emit('close', 1); return; }
+        if (cb) { cb(null, '', ''); } f1.emit('close', 0);
+      }, function (e) { if (cb) { cb(e, '', ''); } f1.emit('close', 1); });
+      return f1;
+    }
+    return juntarSaida(spawn(arq, args, opcoes), opcoes, cb);
+  }
+  function exec(cmd, opcoes, cb) {
+    if (typeof opcoes === 'function') { cb = opcoes; opcoes = {}; }
+    var f = new Filho(), c = String(cmd), m;
+    var fim = function (e, so) { if (cb) { cb(e || null, so || '', ''); } f.emit('exit', e ? 1 : 0); f.emit('close', e ? 1 : 0); };
     depois(function () {
       if (/MachineGuid|IOPlatformExpertDevice/.test(c)) {
         try { var id = sincrono('/plugin/maquina', {}); fim(null, id ? (INFO.platform === 'win32' ? '    MachineGuid    REG_SZ    ' + id : '"IOPlatformUUID" = "' + id + '"') : ''); } catch (e) { fim(e); }
@@ -356,29 +550,22 @@
         if (navigator.clipboard && navigator.clipboard.readText) { navigator.clipboard.readText().then(function (t) { fim(null, t); }, function (e) { fim(e); }); } else { fim(naoDisponivel('área de transferência')); }
         return;
       }
-      var mUrl = /^start "" "?(https?:[^"]+)"?$/.exec(c);
-      if (mUrl) { window.open(mUrl[1], '_blank', 'noopener'); fim(null, ''); return; }
-      var mSel = /^explorer(?: \/select,)? ?"?([^"]+)"?$/.exec(c) || /^open -R "([^"]+)"$/.exec(c);
-      if (mSel) { try { sincrono('/plugin/mostrar', { caminho: mSel[1] }); fim(null, ''); } catch (e) { fim(e); } return; }
+      // proxy do sistema: o conector já sai pela rede do PC
+      if (/Internet Settings|netsh winhttp|scutil --proxy/.test(c)) { fim(null, ''); return; }
+      if ((m = /^where (claude|codex)$/.exec(c)) || (m = /command -v (claude|codex)/.exec(c)) || (m = /which -a (claude|codex)/.exec(c))) {
+        op('/plugin/achar', { nome: m[1], todos: /which -a/.test(c) }).then(function (r) { fim(null, r.saida); }, function (e) { fim(e); });
+        return;
+      }
+      if ((m = /^start "" "?([^"]+\.bat)"?$/i.exec(c))) { var texto = ''; try { texto = fs.readFileSync(m[1], 'utf8'); } catch (e) {} janelaDoTexto(texto, function (e) { fim(e); }); return; }
+      if ((m = /^start "" "?(https?:[^"]+)"?$/.exec(c))) { window.open(m[1], '_blank', 'noopener'); fim(null, ''); return; }
+      if ((m = /^taskkill \/pid (\d+)/i.exec(c))) { op('/plugin/proc/matarPid', { pid: Number(m[1]) }).then(function () { fim(null, ''); }, function (e) { fim(e); }); return; }
+      if ((m = /Compress-Archive -Path '(.+)\\\*' -DestinationPath '(.+)' -Force/.exec(c)) || (m = /^cd "(.+)" && zip -q -r "(.+)" \.$/.exec(c))) {
+        op('/plugin/zipar', { pasta: m[1], zip: m[2] }).then(function (r) { fim(r && r.err ? erroNode(r.err) : null, ''); }, function (e) { fim(e); });
+        return;
+      }
+      if ((m = /^explorer(?: \/select,)? ?"?([^"]+)"?$/.exec(c)) || (m = /^open -R "([^"]+)"$/.exec(c))) { try { sincrono('/plugin/mostrar', { caminho: m[1] }); fim(null, ''); } catch (e) { fim(e); } return; }
       fim(naoDisponivel(c.split(' ')[0]));
     });
-    return f;
-  }
-  function execFile(arq, args, op, cb) {
-    if (typeof args === 'function') { cb = args; args = []; op = {}; }
-    if (typeof op === 'function') { cb = op; op = {}; }
-    var f = new Filho();
-    depois(function () {
-      if (arq === 'open' && args && /^https?:/.test(args[0])) { window.open(args[0], '_blank', 'noopener'); if (cb) { cb(null, '', ''); } return; }
-      if (arq === 'open' && args && args[0] === '-R') { try { sincrono('/plugin/mostrar', { caminho: args[1] }); if (cb) { cb(null, '', ''); } } catch (e) { if (cb) { cb(e, '', ''); } } return; }
-      if (arq === 'open' && args && args[0]) { try { sincrono('/plugin/mostrar', { caminho: args[0] }); if (cb) { cb(null, '', ''); } } catch (e) { if (cb) { cb(e, '', ''); } } return; }
-      var e = naoDisponivel(String(arq).split(/[\\/]/).pop()); if (cb) { cb(e, '', ''); } f.emit('error', e); f.emit('close', 1);
-    });
-    return f;
-  }
-  function spawn(exe) {
-    var f = new Filho(), e = naoDisponivel(String(exe).split(/[\\/]/).pop());
-    depois(function () { f.emit('error', e); f.emit('close', 1); f.emit('exit', 1); });
     return f;
   }
   var child_process = { exec: exec, execFile: execFile, spawn: spawn };
@@ -401,10 +588,39 @@
     var d = ev.data || {};
     if (d.arcano === 'eval-resposta' && pedidos[d.id]) { var cb = pedidos[d.id]; delete pedidos[d.id]; cb(d); }
   });
+  // Arquivos do PC citados no script (logo, vídeo, áudio…) vão para a memória do editor com o MESMO
+  // caminho; o que o editor gravar num caminho do PC (quadros, renders) volta para o PC pelo conector.
+  var RE_CAMINHO = /"((?:[A-Za-z]:\\\\|\/Users\/|\/home\/|\/tmp\/|\/private\/|\/var\/folders\/)(?:[^"\\]|\\.)*)"/g;
+  var enviados = {};
+  function arquivosDoScript(codigo) {
+    var lista = [], vistos = {}, m;
+    RE_CAMINHO.lastIndex = 0;
+    while ((m = RE_CAMINHO.exec(codigo))) {
+      var c; try { c = JSON.parse('"' + m[1] + '"'); } catch (e) { continue; }
+      if (vistos[c]) { continue; } vistos[c] = true;
+      try {
+        var st = fs.statSync(c);
+        if (!st.isFile() || st.size > 1536 * 1048576) { continue; }
+        var marca = st.size + ':' + st.mtimeMs;
+        if (enviados[c] === marca) { continue; }
+        var b = fs.readFileSync(c);
+        lista.push({ caminho: c, bytes: new Uint8Array(b.buffer, b.byteOffset, b.length) });
+        enviados[c] = marca;
+      } catch (e) { /* não existe ou o Arcano não tem acesso: segue sem */ }
+    }
+    return lista;
+  }
+  function devolverAoPC(arquivos) {
+    (arquivos || []).forEach(function (a) {
+      try { fs.writeFileSync(a.caminho, Buffer.from(a.bytes)); var st = fs.statSync(a.caminho); enviados[a.caminho] = st.size + ':' + st.mtimeMs; }
+      catch (e) { try { console.warn('[Arcano] não consegui gravar no PC:', a.caminho, e.message); } catch (x) {} }
+    });
+  }
   function noEditor(codigo, cb) {
     var id = 'e' + (++seq);
-    pedidos[id] = cb;
-    window.parent.postMessage({ arcano: 'eval', id: id, codigo: codigo }, '*');
+    var arquivos = arquivosDoScript(codigo);
+    pedidos[id] = function (r) { devolverAoPC(r.arquivos); cb(r); };
+    window.parent.postMessage({ arcano: 'eval', id: id, codigo: codigo, arquivos: arquivos }, '*');
   }
   // O plugin carrega a biblioteca com $.evalFile(new File("…/jsx/arcano.jsx")): aqui o arquivo vem do site.
   var RE_EVALFILE = /\$\.evalFile\(new File\(("(?:[^"\\]|\\.)*")\)\);?/;
@@ -440,7 +656,7 @@
   };
   var cepUtil = {
     fs: {
-      showOpenDialog: function (multi, pastas, titulo, inicial, tipos) { try { return sincrono('/plugin/janela', { a: [!!multi, !!pastas, titulo || '', inicial || '', tipos || []] }); } catch (e) { return { err: 1, data: [] }; } },
+      showOpenDialog: function (multi, pastas, titulo, inicial, tipos) { try { return sincrono('/plugin/escolher', { a: [!!multi, !!pastas, titulo || '', inicial || '', tipos || []] }); } catch (e) { return { err: 1, data: [] }; } },
       showOpenDialogEx: function (multi, pastas, titulo, inicial, tipos) { return cepUtil.fs.showOpenDialog(multi, pastas, titulo, inicial, tipos); }
     },
     util: { openURLInDefaultBrowser: function (u) { window.open(u, '_blank', 'noopener'); } }
@@ -491,7 +707,9 @@
       try { INFO = sincrono('/plugin/info', {}); } catch (e) { telaSemConector(); setTimeout(iniciar, 4000); return; }
       modulos = { fs: fs, path: path, os: os, crypto: crypto, url: url, zlib: zlib, dns: dns, https: clienteHttp('https:'), http: clienteHttp('http:'), child_process: child_process };
       var processo = {
-        platform: INFO.platform, arch: INFO.arch, env: INFO.env, version: INFO.version, versions: INFO.versions, pid: 1, execPath: '',
+        platform: INFO.platform, arch: INFO.arch,
+        // no Windows o nome das variáveis não diferencia maiúsculas (ProgramFiles = PROGRAMFILES)
+        env: new Proxy(INFO.env || {}, { get: function (o, k) { if (typeof k !== 'string') { return o[k]; } if (k in o) { return o[k]; } var l = k.toLowerCase(); for (var x in o) { if (x.toLowerCase() === l) { return o[x]; } } return undefined; } }), version: INFO.version, versions: INFO.versions, pid: 1, execPath: '',
         cwd: function () { return INFO.home; }, nextTick: function (f) { var a = Array.prototype.slice.call(arguments, 1); depois(function () { f.apply(null, a); }); },
         on: function () {}, once: function () {}, emit: function () {}, hrtime: function () { var t = performance.now(); return [Math.floor(t / 1000), Math.floor((t % 1000) * 1e6)]; }
       };
