@@ -319,7 +319,9 @@ pub(crate) const GATE: &str =""")
     salvar_aep(r)
     tempo_real(r)
     render_simples(r)
-    render_gpu_propria(r)
+    # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
+    # vídeo da RTX 3050, o render caía para o processador no meio e ficava lento. O render volta a usar a
+    # GPU da janela (como no original); a memória fixa menor (memoria_video) é o que evita o Out of Memory.
     memoria_video(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
