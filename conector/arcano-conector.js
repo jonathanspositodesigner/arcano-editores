@@ -29,7 +29,7 @@ const path = require('path');
 const crypto = require('crypto');
 const cp = require('child_process');
 
-const VERSAO = '0.4.1';
+const VERSAO = '0.4.2';
 const PORTAS = [47821, 47822, 47823, 47824, 47825];
 const ORIGENS = [
   'https://layers.voxvisual.com.br',
@@ -344,16 +344,44 @@ function pastasArcano() {
     : (process.platform === 'darwin' ? path.join(casa, 'Library', 'Application Support') : casa);
   const comum = WIN || process.platform === 'darwin' ? path.join(appdata, 'ArcanoMotion') : path.join(casa, '.arcanomotion');
   const design = WIN || process.platform === 'darwin' ? path.join(appdata, 'ArcanoDesign') : path.join(casa, '.arcanodesign');
+  const escrita = [comum, design, path.join(docs, 'Arcano Motion'), path.join(docs, 'Arcano Motion IA'), path.join(docs, 'Arcano Motion LUTs'),
+    path.join(docs, 'Arcano Design'), path.join(casa, 'Downloads', 'Arcano')];
+  const escolhida = pastaArquivosEscolhida(comum);
+  if (escolhida) escrita.push(escolhida);
   return {
     comum,
     design,
     // Gravar e ler livremente (menos as pastas de programas, abaixo).
-    escrita: [comum, design, path.join(docs, 'Arcano Motion'), path.join(docs, 'Arcano Motion IA'), path.join(docs, 'Arcano Motion LUTs'),
-      path.join(docs, 'Arcano Design'), path.join(casa, 'Downloads', 'Arcano')],
+    escrita,
     // Programas que só o conector instala: o navegador lê (para saber se existem), não grava.
     programas: [path.join(comum, 'bin'), path.join(comum, 'ouvido')],
     tmp: os.tmpdir(),
   };
+}
+
+// A pasta dos arquivos que a pessoa escolheu no painel (Conta > Arquivos do Arcano Motion), em
+// <comum>/pastas.json. Só vale uma pasta chamada "Arcano Motion Arquivos" (o painel cria com esse
+// nome dentro do HD/pasta escolhido), fora da raiz do disco e das pastas do sistema.
+const NOME_PASTA_ARQUIVOS = 'Arcano Motion Arquivos';
+let pastasLidas = { m: -1, arq: '', v: null };
+function pastaArquivosEscolhida(comum) {
+  const arq = path.join(comum, 'pastas.json');
+  let m = 0;
+  try { m = fs.statSync(arq).mtimeMs; } catch (e) { return null; }
+  if (pastasLidas.arq === arq && pastasLidas.m === m) return pastasLidas.v;
+  let v = null;
+  try {
+    const p = JSON.parse(fs.readFileSync(arq, 'utf8')).arquivos;
+    if (typeof p === 'string' && p.indexOf('\0') < 0 && path.isAbsolute(p)) {
+      const n = path.resolve(p);
+      const pai = path.dirname(n);
+      const sistema = [process.env.SystemRoot, process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramData, '/System', '/usr', '/bin', '/etc', '/Library']
+        .filter(Boolean).some((d) => dentro(n, d));
+      if (path.basename(n) === NOME_PASTA_ARQUIVOS && pai !== n && !sistema) v = n;
+    }
+  } catch (e) { v = null; }
+  pastasLidas = { m, arq, v };
+  return v;
 }
 
 const liberadosLeitura = new Set(); // arquivos escolhidos pela pessoa (janela de abrir) e arrastados
@@ -688,6 +716,41 @@ function montarIndiceFontes() {
   for (const [k, p] of fracos) if (!idx.has(k)) idx.set(k, p);
   return idx;
 }
+// Conta > Limpar cache do painel: mede (ou apaga) os arquivos das pastas do Arcano, só os mais
+// velhos que `dias` (e nunca os de menos de `minHoras`, que podem estar em uso). Pastas vazias saem.
+async function opLimpeza(c) {
+  const apagar = c.acao === 'limpar';
+  const limite = Date.now() - Math.max(Number(c.dias) || 0, (Number(c.minHoras) || 0) / 24) * 86400000;
+  const pastas = (Array.isArray(c.pastas) ? c.pastas : []).map(String).filter(Boolean).slice(0, 40);
+  const fsp = fs.promises;
+  const r = [];
+  async function andar(dir, conta) {
+    let itens;
+    try { itens = await fsp.readdir(dir, { withFileTypes: true }); } catch (e) { return; }
+    for (const it of itens) {
+      const p = path.join(dir, it.name);
+      if (it.isSymbolicLink()) continue;
+      if (it.isDirectory()) {
+        await andar(p, conta);
+        if (apagar) { try { await fsp.rmdir(p); } catch (e) { /* não está vazia */ } }
+        continue;
+      }
+      let st;
+      try { st = await fsp.stat(p); } catch (e) { continue; }
+      if (st.mtimeMs > limite) { conta.ficam++; continue; }
+      if (apagar) { try { await fsp.unlink(p); } catch (e) { conta.falhas++; continue; } }
+      conta.arquivos++; conta.bytes += st.size;
+    }
+  }
+  for (const d of pastas) {
+    const conta = { pasta: d, arquivos: 0, bytes: 0, ficam: 0, falhas: 0 };
+    try { conferirCaminho(d, 'gravar'); } catch (e) { conta.erro = 'sem acesso'; r.push(conta); continue; }
+    await andar(path.resolve(d), conta);
+    r.push(conta);
+  }
+  return r;
+}
+
 function opFontes(c) {
   const nomes = (Array.isArray(c.nomes) ? c.nomes : []).map(String).filter(Boolean).slice(0, 64);
   const achar = () => {
@@ -1110,6 +1173,7 @@ async function tratarPlugin2(url, json, c) {
     case '/plugin/zipar': await tentar(() => opZipar(c)); return true;
     case '/plugin/achar': await tentar(() => opAcharPrograma(c)); return true;
 case '/plugin/fontes': await tentar(() => opFontes(c)); return true;
+    case '/plugin/limpeza': await tentar(() => opLimpeza(c)); return true;
     case '/plugin/janela': await tentar(() => opJanela(c)); return true;
     case '/plugin/editorpc': await tentar(() => opEditorPC(c)); return true;
     case '/plugin/editorpc/pedido': await tentar(() => pedidoEditorPC(String(c.app || 'imagem'), c.metodo, c.params)); return true;
