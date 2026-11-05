@@ -319,6 +319,7 @@ pub(crate) const GATE: &str =""")
     tempo_real(r)
     render_simples(r)
     render_gpu_propria(r)
+    memoria_video(r)
     troca(r, "apps/effectcraft-web/src/api.rs", "/// Put bytes into the file table under `/<name>` and open",
           "/// Arcano: guarda bytes com o caminho exato (do PC), sem abrir nem importar (ponte do plugin).\n"
           "#[wasm_bindgen(js_name = putFile)]\npub fn put_file(path: String, data: js_sys::Uint8Array) {\n"
@@ -456,11 +457,23 @@ def render_gpu_propria(r):
           "                #[cfg(not(target_arch = \"wasm32\"))]\n"
           "                std::thread::spawn(|| {\n"
           "                    if let Some(e) = effectcraft_gpu::Gpu::headless() {\n"
+          "                        // pouca memória de vídeo para o render: a janela também precisa\n"
+          "                        e.context().set_upload_budget(384 << 20);\n"
           "                        log::info!(\"Arcano: GPU própria do render pronta\");\n"
           "                        *effectcraft_engine::render_queue::ACCEL_EXPORTACAO.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Arc::new(e));\n"
           "                    }\n"
           "                });\n"
           "                self.gpu = Some(g);\n")
+
+
+def memoria_video(r):
+    """Memória de vídeo (registro do dono: "uncaptured GPU error: Out of Memory" numa RTX 3050 com o
+    disco C: quase cheio, e o programa fechou): o compositor guardava até ~2,5 GB fixos (camadas
+    1,5 GB + texturas de trabalho 768 MB + leitura 256 MB), qualquer que fosse a placa. Agora metade."""
+    ctx = "crates/gpu/src/context.rs"
+    troca(r, ctx, "const UPLOAD_BUDGET: usize = 1536 << 20;", "const UPLOAD_BUDGET: usize = 768 << 20;")
+    troca(r, ctx, "const POOL_BUDGET: usize = 768 << 20;", "const POOL_BUDGET: usize = 384 << 20;")
+    troca(r, ctx, "const STAGING_BUDGET: u64 = 256 << 20;", "const STAGING_BUDGET: u64 = 128 << 20;")
 
 
 def render_simples(r):
