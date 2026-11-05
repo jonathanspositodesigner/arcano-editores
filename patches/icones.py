@@ -1,5 +1,5 @@
 """Ícones dos programas instalados (Windows .ico, Mac .icns, PNGs que o app embute).
-Vídeo (o "After") usa o ícone do Arcano Motion; imagem (o "Photoshop") usa o do ArcanoApp.
+Vídeo (o "After") usa o ícone "Ae"; imagem (o "Photoshop") usa o "Ps" (ícones do dono).
 Uso: python3 icones.py <video|imagem> <pasta assets/app-icon do código> <prefixo dos arquivos>"""
 import pathlib
 import sys
@@ -9,9 +9,8 @@ AQUI = pathlib.Path(__file__).parent / "assets" / "fontes"
 
 
 def fonte(app):
-    if app == "video":
-        return Image.open(AQUI / "arcano-motion.png").convert("RGBA"), True   # logo transparente: vai num quadrado branco
-    return Image.open(AQUI / "arcanoapp-1080.png").convert("RGBA"), False  # já tem fundo claro
+    # ícones do dono (05/11/2026): "Ae" no de vídeo, "Ps" no de imagem (já vêm em quadrado arredondado)
+    return Image.open(AQUI / ("icone-video.png" if app == "video" else "icone-imagem.png")).convert("RGBA"), False
 
 
 def ladrilho(app, tam, margem=0.0):

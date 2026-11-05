@@ -95,7 +95,7 @@ def photocraft(r):
         t = p.read_text(encoding="utf-8")
         if "<title>PhotoCraft</title>" in t:
             t = t.replace("<title>PhotoCraft</title>",
-                          f'<title>{NOME} · Imagem</title>\n  <link rel="icon" href="arcano.svg" type="image/svg+xml">')
+                          f'<title>{NOME} · Imagem</title>\n  <link rel="icon" href="icone.png" type="image/png">')
             p.write_text(t, encoding="utf-8")
             print(f"ok  {f}")
     # Gancho do Arcano (trava de login, painel do Photoshop): mora em /painel, fora do build,
@@ -113,7 +113,7 @@ def photocraft(r):
     troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(0, 66, 150)", "accent_text: Color32::from_rgb(107, 33, 168)")
     troca(r, "crates/ui-egui/src/theme.rs", "accent_text: Color32::from_rgb(16, 98, 196)", "accent_text: Color32::from_rgb(126, 34, 206)")
     # Ícone do canto superior esquerdo (onde o Photoshop mostra o "Ps").
-    copia(ASSETS / "arcano-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
+    copia(ASSETS / "imagem-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.photocraft.png")
     # Painel do Arcano Design (o plugin do Photoshop) falando com o editor de forma síncrona
     # (window.photocraftArcano, carregado pelo montar-imagem.js): apps/photocraft-web/src/arcano.rs.
     copia(pathlib.Path(__file__).parent / "arquivos/photocraft-web-arcano.rs", pathlib.Path(r) / "apps/photocraft-web/src/arcano.rs")
@@ -147,8 +147,12 @@ def copia(origem, destino):
 
 def effectcraft(r):
     # Logo do ArtCraft (marca registrada deles, não é open source) vira o logo do Arcano.
-    copia(ASSETS / "arcano-256.png", pathlib.Path(r) / "docs/brand/artcraft-mark.png")
-    for nome, arq in (("favicon.svg", "arcano.svg"), ("icon-256.png", "arcano-256.png"), ("icon-512.png", "arcano-512.png")):
+    copia(ASSETS / "video-256.png", pathlib.Path(r) / "docs/brand/artcraft-mark.png")
+    copia(ASSETS / "video-128.png", pathlib.Path(r) / "assets/app-icon/hicolor/128x128/apps/ai.storyteller.effectcraft.png")
+    copia(ASSETS / "video-64.png", pathlib.Path(r) / "apps/effectcraft-web/web/favicon.png")
+    troca(r, "apps/effectcraft-web/web/index.html", '<link rel="icon" href="favicon.svg" type="image/svg+xml">', '<link rel="icon" href="favicon.png" type="image/png">')
+    troca(r, "apps/effectcraft-web/web/index.html", '<img src="favicon.svg" alt="">', '<img src="icon-256.png" alt="">')
+    for nome, arq in (("favicon.svg", "arcano.svg"), ("icon-256.png", "video-256.png"), ("icon-512.png", "video-512.png")):
         destino = pathlib.Path(r) / "apps/effectcraft-web/web" / nome
         if destino.exists():
             copia(ASSETS / arq, destino)
@@ -422,16 +426,19 @@ def painel_pc_video(r):
           "/// Driven by an agent (`--control`): don't activate the app on launch")
     # o painel dentro da janela + a trava de login
     copia(arq / "painel_arcano.rs", pathlib.Path(r) / "apps/effectcraft/src/painel_arcano.rs")
-    troca(r, m, "mod control_server;", "mod control_server;\nmod painel_arcano;")
+    troca(r, m, "mod control_server;", "mod atualizador_arcano;\nmod control_server;\nmod painel_arcano;")
+    copia(arq / "atualizador_arcano.rs", pathlib.Path(r) / "apps/effectcraft/src/atualizador_arcano.rs")
+    troca(r, "apps/effectcraft/Cargo.toml", "serde_json = { workspace = true }\n", "serde_json = { workspace = true }\nureq = \"3\"\n")
     troca(r, m, "    /// The first frame was drawn (logged once).\n    drawn: bool,\n}",
-          "    /// The first frame was drawn (logged once).\n    drawn: bool,\n    /// O painel do Arcano Motion dentro da janela.\n    painel: painel_arcano::Painel,\n}")
+          "    /// The first frame was drawn (logged once).\n    drawn: bool,\n    /// O painel do Arcano Motion dentro da janela.\n    painel: painel_arcano::Painel,\n    /// Atualização pelo próprio programa.\n    atualizador: atualizador_arcano::Atualizador,\n}")
     troca(r, m, "                launch,\n                drawn: false,\n            }))",
-          "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\"),\n            }))")
+          "                launch,\n                drawn: false,\n                painel: painel_arcano::Painel::new(\"video\"),\n                atualizador: atualizador_arcano::Atualizador::new(\"video\"),\n            }))")
     troca(r, m, "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n",
           "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.app.ui(ui, frame);\n"
           "        let lugar = effectcraft_ui_egui::arcano_painel::lugar(ui.ctx());\n"
           "        self.painel.quadro(ui.ctx(), frame, lugar);\n"
-          "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n")
+          "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n"
+          "        self.atualizador.quadro(ui.ctx(), \"Arcano Layers Vídeo\");\n")
     p = pathlib.Path(r) / "apps/effectcraft/Cargo.toml"
     p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
     # a aba "Arcano Motion" da doca (no lugar do VR Comp Editor), acima do Preview no layout padrão
@@ -513,7 +520,9 @@ fn arcano_controle(
     arq = pathlib.Path(__file__).parent / "arquivos"
     copia(arq / "painel_arcano.rs", pathlib.Path(r) / "apps/photocraft/src/painel_arcano.rs")
     copia(arq / "photocraft-host-arcano.rs", pathlib.Path(r) / "apps/photocraft/src/host_arcano.rs")
-    troca(r, m, "mod app_dirs;", "mod app_dirs;\nmod host_arcano;\nmod painel_arcano;")
+    troca(r, m, "mod app_dirs;", "mod app_dirs;\nmod atualizador_arcano;\nmod host_arcano;\nmod painel_arcano;")
+    copia(arq / "atualizador_arcano.rs", pathlib.Path(r) / "apps/photocraft/src/atualizador_arcano.rs")
+    troca(r, "apps/photocraft/Cargo.toml", "serde_json = { workspace = true }\n", "serde_json = { workspace = true }\nureq = \"3\"\n")
     troca(r, m, "            Ok(Box::new(app))\n        }),", "            Ok(Box::new(host_arcano::Host::new(app)))\n        }),")
     # barra de título do sistema (a do editor ficaria embaixo da coluna do painel)
     troca(r, m, "    CUSTOM_TITLEBAR && !prefs.interface.system_title_bar\n}", "    let _ = (CUSTOM_TITLEBAR, prefs.interface.system_title_bar);\n    false\n}")

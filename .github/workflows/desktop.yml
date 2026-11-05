@@ -70,6 +70,7 @@ jobs:
         working-directory: src
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+          ARCANO_BUILD: ${{ github.run_number }}   # número da versão: o programa se compara com o publicado
         run: cargo build --release -p "$CRATE"  # sem --locked: o patch do painel acrescenta o wry
       - name: Arcano Conector (Node embutido)
         working-directory: site/conector
@@ -111,6 +112,9 @@ jobs:
           F="$ARQUIVO-Windows.exe"
           gh release view pc -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create pc -R "$GITHUB_REPOSITORY" --title "Arcano Layers para PC" --notes "Instaladores do Arcano Layers (Windows e Mac), com o Arcano Conector." || true
           gh release upload pc "pacote/$F" -R "$GITHUB_REPOSITORY" --clobber
+          # aviso de atualização dentro do programa: a última versão publicada deste programa/sistema
+          printf '{"build": %s, "arquivo": "%s"}\n' "${{ github.run_number }}" "$F" > "versao-${{ matrix.app }}-windows.json"
+          gh release upload pc "versao-${{ matrix.app }}-windows.json" -R "$GITHUB_REPOSITORY" --clobber
           echo "https://github.com/$GITHUB_REPOSITORY/releases/download/pc/$F"
 
   mac:
@@ -154,6 +158,8 @@ jobs:
           python site/patches/apply.py "$PATCH" src --desktop
       - name: Compilar (Apple Silicon + Intel)
         working-directory: src
+        env:
+          ARCANO_BUILD: ${{ github.run_number }}
         run: cargo build --release -p "$CRATE" --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: App (.app)
         run: |
@@ -208,4 +214,6 @@ jobs:
           F="$ARQUIVO-Mac.pkg"
           gh release view pc -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create pc -R "$GITHUB_REPOSITORY" --title "Arcano Layers para PC" --notes "Instaladores do Arcano Layers (Windows e Mac), com o Arcano Conector." || true
           gh release upload pc "$F" -R "$GITHUB_REPOSITORY" --clobber
+          printf '{"build": %s, "arquivo": "%s"}\n' "${{ github.run_number }}" "$F" > "versao-${{ matrix.app }}-mac.json"
+          gh release upload pc "versao-${{ matrix.app }}-mac.json" -R "$GITHUB_REPOSITORY" --clobber
           echo "https://github.com/$GITHUB_REPOSITORY/releases/download/pc/$F"

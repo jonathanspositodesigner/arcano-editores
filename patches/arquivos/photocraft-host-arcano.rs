@@ -6,11 +6,12 @@ use photocraft_ui_egui::PhotocraftApp;
 pub struct Host {
     app: PhotocraftApp,
     painel: crate::painel_arcano::Painel,
+    atualizador: crate::atualizador_arcano::Atualizador,
 }
 
 impl Host {
     pub fn new(app: PhotocraftApp) -> Self {
-        Self { app, painel: crate::painel_arcano::Painel::new("imagem") }
+        Self { app, painel: crate::painel_arcano::Painel::new("imagem"), atualizador: crate::atualizador_arcano::Atualizador::new("imagem") }
     }
 }
 
@@ -44,5 +45,6 @@ impl eframe::App for Host {
         eframe::App::ui(&mut self.app, ui, frame);
         self.painel.quadro(ui.ctx(), frame, Some(lugar));
         self.painel.trava(ui.ctx(), "Arcano Design");
+        self.atualizador.quadro(ui.ctx(), "Arcano Layers Imagem");
     }
 }

@@ -58,7 +58,7 @@ jobs:
           rm -rf site/imagem && cp -R "$OUT" site/imagem
           # O pacote oficial procura os snippets em app/ (bug deles na 0.19.0).
           [ -d site/imagem/snippets ] && cp -R site/imagem/snippets site/imagem/app/ || true
-          cp site/patches/assets/arcano.svg site/imagem/arcano.svg
+          cp site/patches/assets/imagem-64.png site/imagem/icone.png
           du -sh site/imagem
       - name: Publicar
         run: |
@@ -117,9 +117,9 @@ jobs:
           OUT=$(ls -d src/target/web-package/effectcraft-web-*/ | head -1)
           rm -rf site/video && cp -R "$OUT" site/video
           echo '{"startup":"empty"}' > site/video/effectcraft-config.json
-          cp site/patches/assets/arcano.svg site/video/favicon.svg
-          cp site/patches/assets/arcano-256.png site/video/icon-256.png
-          cp site/patches/assets/arcano-512.png site/video/icon-512.png
+          cp site/patches/assets/video-64.png site/video/favicon.png
+          cp site/patches/assets/video-256.png site/video/icon-256.png
+          cp site/patches/assets/video-512.png site/video/icon-512.png
           rm -f site/video/favicon.svg.attribution
           python3 site/patches/limpar_wasm.py site/video/effectcraft_web_bg.wasm
           du -sh site/video
