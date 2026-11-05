@@ -42,7 +42,29 @@ pub struct Painel {
     ao_receber: Option<fn(&str)>,
     /// Pedidos do editor esperando o painel abrir.
     fila: Vec<String>,
+    /// Painel "só ferramentas" (editor de imagem, em cima do painel completo): o MESMO plugin, aberto
+    /// direto na aba Ferramentas e sem a barra de abas (script injetado ao carregar a página).
+    so_ferramentas: bool,
 }
+
+/// Abre a aba Ferramentas do Photoshop (efeitos-ps) assim que o plugin monta as abas e esconde a barra
+/// de abas. Clica uma vez só: depois a pessoa navega pelas ferramentas (Separar em camadas…) à vontade.
+const SCRIPT_SO_FERRAMENTAS: &str = r#"(function () {
+  if (window.top !== window) { return; }
+  window.ARCANO_SO_FERRAMENTAS = true;
+  var n = 0, t = setInterval(function () {
+    n++;
+    if (document.head && !document.getElementById('arcano-so-ferramentas')) {
+      var s = document.createElement('style');
+      s.id = 'arcano-so-ferramentas';
+      s.textContent = '#abas-caixa,#sub-abas{display:none!important}';
+      document.head.appendChild(s);
+    }
+    var b = document.querySelector('.aba[data-aba="efeitos-ps"]');
+    if (b) { if (!b.classList.contains('ativa')) { b.click(); } clearInterval(t); }
+    else if (n > 1200) { clearInterval(t); }
+  }, 250);
+})();"#;
 
 impl Painel {
     pub fn new(app: &'static str) -> Self {
@@ -62,7 +84,13 @@ impl Painel {
             erro: None,
             ao_receber: None,
             fila: Vec::new(),
+            so_ferramentas: false,
         }
+    }
+
+    /// O painel de ferramentas de cima (editor de imagem): só aparece com a conta entrada.
+    pub fn ferramentas(app: &'static str) -> Self {
+        Self { so_ferramentas: true, ..Self::new(app) }
     }
 
     /// O programa está fechando: solta o painel ainda com a janela viva e garante que o processo
@@ -149,7 +177,7 @@ impl Painel {
     pub fn quadro<W: wry_janela::HasWindowHandle>(&mut self, ctx: &egui::Context, frame: &W, lugar: Lugar) {
         let lugar = match lugar {
             Some(r) => Some(r),
-            None if !self.logado() => {
+            None if !self.so_ferramentas && !self.logado() => {
                 let t = ctx.content_rect();
                 let w = 420.0_f32.min(t.width() * 0.5);
                 Some(egui::Rect::from_min_max(egui::pos2(t.max.x - w, t.min.y + 28.0), t.max))
@@ -171,7 +199,7 @@ impl Painel {
                 })
             })
         });
-        let lugar = if (self.logado && egui::Popup::is_any_open(ctx)) || aviso || coberto { None } else { lugar };
+        let lugar = if (self.logado && egui::Popup::is_any_open(ctx)) || aviso || coberto || (self.so_ferramentas && !self.logado()) { None } else { lugar };
         #[cfg(any(windows, target_os = "macos"))]
         {
             if self.web.is_none() && lugar.is_some() && self.erro.is_none() {
@@ -205,8 +233,15 @@ impl Painel {
                         if self.visivel {
                             self.visivel = false;
                             let _ = web.set_visible(false);
+                            let _ = web.focus_parent();
                         }
                     }
+                }
+                // Clique no editor (o clique dentro do painel não chega ao egui): o teclado volta para
+                // o editor. Sem isso o painel continuava com o foco e Delete, Ctrl+Z e os atalhos iam
+                // para ele, não para a composição/linha do tempo.
+                if ctx.input(|i| i.pointer.any_pressed()) {
+                    let _ = web.focus_parent();
                 }
             }
         }
@@ -285,12 +320,16 @@ impl Painel {
 
     #[cfg(any(windows, target_os = "macos"))]
     fn criar<W: wry_janela::HasWindowHandle>(&mut self, base: &str, frame: &W) {
-        let url = format!("{base}/ui/plugin/index-web.html?pc={}", self.app);
+        let url = format!("{base}/ui/plugin/index-web.html?pc={}{}", self.app, if self.so_ferramentas { "&so=ferramentas" } else { "" });
         // Windows: os dados do WebView ficam na pasta do usuário (Arquivos de Programas não é gravável).
         let dados = Self::pasta_comum().map(|p| p.join(format!("painel-{}", self.app)));
         let mut contexto = wry::WebContext::new(dados);
         let ao_receber = self.ao_receber;
-        let r = wry::WebViewBuilder::new_with_web_context(&mut contexto)
+        let mut construtor = wry::WebViewBuilder::new_with_web_context(&mut contexto);
+        if self.so_ferramentas {
+            construtor = construtor.with_initialization_script(SCRIPT_SO_FERRAMENTAS);
+        }
+        let r = construtor
             // recados do painel para o editor (barra rápida, conta)
             .with_ipc_handler(move |pedido: wry::http::Request<String>| {
                 if let Some(f) = ao_receber {

@@ -495,95 +495,9 @@ def render_simples(r):
 
 
 def tempo_real(r):
-    """Prévia em tempo real (pedido do dono: "como o CapCut, nunca trava"): som e relógio não param
-    esperando quadro; quadro atrasado é pulado; o que renderiza é o que está à frente do relógio;
-    resolução Auto baixa sozinha se não der conta; cache quando ocioso ligado por padrão
-    (arquivos/ui-arcano-tempo-real.rs)."""
-    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-tempo-real.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_tempo_real.rs")
-    troca(r, "crates/ui-egui/src/lib.rs", "pub mod menus;\n", "pub mod arcano_tempo_real;\npub mod menus;\n")
-    pf = "crates/ui-egui/src/app/prefetch.rs"
-    # resolução automática enquanto toca
-    troca(r, pf, "        let plan = self.playback.plan.filter(|_| self.playback.playing);\n        let (wa, wb) = match plan {",
-          "        if self.playback.playing && !self.playback.caching {\n            crate::arcano_tempo_real::ajustar_resolucao(&mut self.playback, now);\n        }\n"
-          "        let plan = self.playback.plan.filter(|_| self.playback.playing);\n        let (wa, wb) = match plan {")
-    # pedir à frente do relógio quando atrasado
-    troca(r, pf, "        let cached = self.frames.cached_frames(&series);\n        let uncached = |f: i64| cached.binary_search(&f).is_err();\n",
-          "        let cached = self.frames.cached_frames(&series);\n"
-          "        // Arcano (tempo real): atrasada, a prévia pede os quadros À FRENTE do relógio, no passo\n"
-          "        // que o computador dá conta (nunca quadro que já passou).\n"
-          "        if self.playback.playing\n"
-          "            && video\n"
-          "            && let (Some(p), Some(alvo)) = (plan, crate::arcano_tempo_real::alvo(pass.now))\n"
-          "        {\n"
-          "            let passo = crate::arcano_tempo_real::passo(&self.playback);\n"
-          "            for k in 1..=(ahead * 2) {\n"
-          "                if queued >= ahead as usize {\n"
-          "                    break;\n"
-          "                }\n"
-          "                let Some(f) = p.frame_after(alvo, k * passo) else { break };\n"
-          "                if cached.binary_search(&f).is_err() {\n"
-          "                    self.request_frame(cid, f, scale);\n"
-          "                    queued += 1;\n"
-          "                }\n"
-          "            }\n"
-          "            return;\n"
-          "        }\n"
-          "        let uncached = |f: i64| cached.binary_search(&f).is_err();\n")
-    # relógio do som: não para o som, pula o quadro atrasado
-    troca(r, pf,
-          "        } else {\n"
-          "            // Rendering can't keep up: rather than skip frames, the sound stops and every\n"
-          "            // frame shows as it renders until the frames ahead are cached again.\n"
-          "            self.audio = None;\n"
-          "            self.playback.audio_held = true;\n"
-          "            self.playback.waiting = true;\n"
-          "            // The rate measured before the stall no longer says it keeps up.\n"
-          "            self.playback.shown_at.clear();\n"
-          "            self.playback.start_wall = now;\n"
-          "            self.playback.start_frame = cur;\n"
-          "        }\n",
-          "        } else {\n"
-          "            // Arcano (tempo real): o som segue; a tela mostra o último quadro pronto até o relógio.\n"
-          "            crate::arcano_tempo_real::atrasado(target, now);\n"
-          "            self.playback.waiting = false;\n"
-          "            if let Some(f) = crate::arcano_tempo_real::melhor_pronto(&self.frames.cached_frames(&series), cur, target) {\n"
-          "                self.session.set_time(fr.tick_of(f));\n"
-          "                self.playback.frame_shown(now);\n"
-          "            }\n"
-          "        }\n")
-    # relógio de parede (sem som): o relógio não para
-    troca(r, pf,
-          "            // Not cached yet: hold the clock at the current frame (cache first, then play).\n"
-          "            self.playback.waiting = true;\n"
-          "            let next = plan.and_then(|p| p.frame_after(cur, 1)).unwrap_or(if cur + 1 > wb { wa } else { cur + 1 });\n"
-          "            if self.frames.is_cached(&FrameKey { frame: next, ..series }) {\n"
-          "                self.session.set_time(fr.tick_of(next));\n"
-          "            }\n"
-          "            self.playback.start_wall = now;\n"
-          "            self.playback.start_frame = fr.frame_at(self.session.time());\n",
-          "            // Arcano (tempo real): o relógio não para; a tela mostra o último quadro pronto até ele.\n"
-          "            crate::arcano_tempo_real::atrasado(target, now);\n"
-          "            self.playback.waiting = false;\n"
-          "            if let Some(f) = crate::arcano_tempo_real::melhor_pronto(&self.frames.cached_frames(&series), cur, target) {\n"
-          "                self.session.set_time(fr.tick_of(f));\n"
-          "                self.playback.frame_shown(now);\n"
-          "            }\n")
-    # começar na hora, som e imagem juntos (sem esperar encher o cache)
-    troca(r, "crates/ui-egui/src/app/playback.rs",
-          "        if !self.playback.caching {\n"
-          "            if plan.video {\n"
-          "                let audible = self.audio_plays();\n"
-          "                self.playback.audio_held = audible;\n"
-          "                self.playback.starting = audible;\n"
-          "            } else {\n"
-          "                self.start_audio(fr.tick_of(plan.first));\n"
-          "            }\n"
-          "        }\n",
-          "        crate::arcano_tempo_real::comecou(self.playback.res.is_none(), now);\n"
-          "        if !self.playback.caching {\n"
-          "            // Arcano (tempo real): som e imagem começam juntos, na hora.\n"
-          "            self.start_audio(fr.tick_of(plan.first));\n"
-          "        }\n")
+    """Prévia: cache quando ocioso ligado por padrão (parado, o editor já vai renderizando a área de
+    trabalho por trás). O "som segue sem imagem" (05/11) foi desfeito a pedido do dono: a prévia volta
+    a esperar o quadro, como antes."""
     # cache quando ocioso ligado por padrão
     troca(r, "crates/engine/src/settings/prefs/sections.rs", "    cache_frames_when_idle: bool = false,", "    cache_frames_when_idle: bool = true,")
     troca(r, "crates/ui-egui/src/state.rs", "            cache_when_idle: false,\n", "            cache_when_idle: true,\n")
@@ -989,7 +903,7 @@ def painel_pc_video(r):
           "            }\n"
           "        }\n"
           "        self.painel.trava(ui.ctx(), \"Arcano Motion\");\n"
-          "        self.atualizador.quadro(ui.ctx(), \"Arcano Layers Vídeo\");\n")
+          "        self.atualizador.quadro(ui.ctx(), \"Arcano Layers Vídeo\", effectcraft_ui_egui::ARCANO_CONFERIR_ATUALIZACAO.swap(false, std::sync::atomic::Ordering::Relaxed));\n")
     p = pathlib.Path(r) / "apps/effectcraft/Cargo.toml"
     p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
     # a aba "Arcano Motion" da doca (no lugar do VR Comp Editor), acima do Preview no layout padrão
@@ -1081,6 +995,24 @@ fn arcano_controle(
     p.write_text(p.read_text(encoding="utf-8") + '\n[target.\'cfg(any(windows, target_os = "macos"))\'.dependencies]\nwry = "0.57"\n', encoding="utf-8")
 
 
+def procurar_atualizacao(r, app):
+    """Programa de PC: Ajuda ▸ Procurar atualização confere na hora o build publicado (o atualizador do
+    Arcano, arquivos/atualizador_arcano.rs, mostra "Atualizar agora", "já está na mais nova" ou o erro,
+    com o número da versão). O do programa original ficava desligado (cinza) no editor de imagem."""
+    lib = pathlib.Path(r) / "crates/ui-egui/src/lib.rs"
+    lib.write_text(lib.read_text(encoding="utf-8") + "\n/// Arcano: Ajuda ▸ Procurar atualização foi pedido (o programa de PC confere e mostra o resultado).\n"
+                   "pub static ARCANO_CONFERIR_ATUALIZACAO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);\n", encoding="utf-8")
+    if app == "effectcraft":
+        troca(r, "crates/engine/src/menus.rs", "  Voltar ao início | help.website\n", "  Voltar ao início | help.website\n  Procurar atualização... | help.checkForUpdates\n")
+        troca(r, "crates/ui-egui/src/menus/entries.rs", '    if e.command == "window.panel" {\n',
+              '    if e.command == "help.checkForUpdates" {\n        return true;\n    }\n    if e.command == "window.panel" {\n')
+    else:
+        troca(r, "crates/ui-egui/src/menus/invoke.rs", "    if id == \"help.checkForUpdates\" {\n        return Some(crate::updates_ui::check(app, ctx, params.clone()));\n    }\n",
+              "    if id == \"help.checkForUpdates\" {\n        crate::ARCANO_CONFERIR_ATUALIZACAO.store(true, std::sync::atomic::Ordering::Relaxed);\n        ctx.request_repaint();\n        return Some(Ok(Value::Null));\n    }\n")
+        troca(r, "crates/ui-egui/src/menus/state.rs", "pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {\n",
+              "pub fn is_enabled(app: &PhotocraftApp, id: &str) -> bool {\n    if id == \"help.checkForUpdates\" {\n        return true;\n    }\n")
+
+
 def hd_trabalho(r):
     """Programa de PC (vídeo): Editar ▸ HD de trabalho… escolhe o HD do cache da prévia, do cache
     de mídia e do áudio convertido (os três de uma vez); abre sozinha quando o HD do cache está
@@ -1110,7 +1042,9 @@ def desktop(app, raiz):
         hd_trabalho(raiz)
         # Sem o atualizador do programa original (baixaria a versão deles, com o nome deles): quem atualiza somos nós.
         troca(raiz, "apps/effectcraft/src/main.rs", "            app.set_startup_update_check(true);", "            app.set_startup_update_check(false);")
-        troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null", "            let _ = &app;\n            Value::Null")
+        troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null",
+              "            let _ = &app;\n            crate::ARCANO_CONFERIR_ATUALIZACAO.store(true, std::sync::atomic::Ordering::Relaxed);\n            Value::Null")
+        procurar_atualizacao(raiz, "effectcraft")
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
         troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
         troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')
@@ -1118,6 +1052,7 @@ def desktop(app, raiz):
     else:
         icones.gerar("imagem", pathlib.Path(raiz) / "assets/app-icon", "photocraft", "ai.storyteller.photocraft")
         painel_pc_imagem(raiz)
+        procurar_atualizacao(raiz, "photocraft")
         # Sem o atualizador do programa original (quem atualiza somos nós).
         troca(raiz, "apps/photocraft/src/services.rs", "        check_updates: Some(crate::updates::service()),", "        check_updates: None,")
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).

@@ -2,6 +2,9 @@
 //! versão publicada (versao-<app>-<sistema>.json na página de downloads do Arcano Layers); sendo
 //! mais nova que esta, mostra o aviso "Atualizar agora": baixa o instalador novo, abre ele e fecha
 //! o programa (o instalador põe a versão nova no lugar).
+//! Confere ao abrir e quando a pessoa pede (Ajuda ▸ Procurar atualização), nunca sozinho depois. A janela
+//! fica no canto de baixo à ESQUERDA: à direita fica o painel do Arcano (que é uma janela do sistema
+//! e cobriria o aviso).
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -20,12 +23,15 @@ enum Estado {
     Baixando { feito: u64, total: u64 },
     Erro(String),
     Pronto,
+    /// Pedido à mão e já está na mais nova.
+    EmDia,
 }
 
 pub struct Atualizador {
     app: &'static str,
     estado: Arc<Mutex<Estado>>,
     dispensado: bool,
+    /// Já conferiu ao abrir.
     conferiu: bool,
 }
 
@@ -42,21 +48,39 @@ impl Atualizador {
         self.estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
     }
 
-    fn conferir(&mut self, ctx: &egui::Context) {
-        if self.conferiu || esta() == 0 || sistema() == "linux" {
+    /// Confere a versão publicada: uma vez ao abrir e quando `pedido` (à mão: aí também avisa "já está
+    /// na mais nova" ou o erro).
+    fn conferir(&mut self, ctx: &egui::Context, pedido: bool) {
+        if pedido {
+            self.dispensado = false;
+            if esta() == 0 || sistema() == "linux" {
+                *self.estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Estado::Erro("esta cópia foi compilada à mão e não se atualiza sozinha".into());
+                return;
+            }
+        } else if esta() == 0 || sistema() == "linux" || self.conferiu {
             return;
         }
         self.conferiu = true;
         let (estado, app, ctx) = (self.estado.clone(), self.app, ctx.clone());
         std::thread::spawn(move || {
             let url = format!("{BASE}/versao-{app}-{}.json", sistema());
-            let r = ureq::get(&url).call().ok().and_then(|mut r| r.body_mut().read_to_string().ok());
-            let Some(v) = r.and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
-            let build = v.get("build").and_then(serde_json::Value::as_u64).unwrap_or(0);
-            let arquivo = v.get("arquivo").and_then(|a| a.as_str()).unwrap_or("").to_string();
-            let seguro = !arquivo.is_empty() && arquivo.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
-            if build > esta() && seguro {
-                *estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Estado::Disponivel { build, arquivo };
+            let r = ureq::get(&url).call().map_err(|e| e.to_string()).and_then(|mut r| r.body_mut().read_to_string().map_err(|e| e.to_string()));
+            let v = r.and_then(|t| serde_json::from_str::<serde_json::Value>(&t).map_err(|e| e.to_string()));
+            let novo = match v {
+                Ok(v) => {
+                    let build = v.get("build").and_then(serde_json::Value::as_u64).unwrap_or(0);
+                    let arquivo = v.get("arquivo").and_then(|a| a.as_str()).unwrap_or("").to_string();
+                    let seguro = !arquivo.is_empty() && arquivo.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+                    if build > esta() && seguro {
+                        Some(Estado::Disponivel { build, arquivo })
+                    } else {
+                        pedido.then_some(Estado::EmDia)
+                    }
+                }
+                Err(e) => pedido.then(|| Estado::Erro(format!("não consegui conferir agora ({e})"))),
+            };
+            if let Some(n) = novo {
+                *estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = n;
                 ctx.request_repaint();
             }
         });
@@ -100,9 +124,10 @@ impl Atualizador {
         });
     }
 
-    /// A cada quadro: confere (uma vez) e mostra o aviso quando tem versão nova.
-    pub fn quadro(&mut self, ctx: &egui::Context, nome: &str) {
-        self.conferir(ctx);
+    /// A cada quadro: confere (ao abrir ou quando `pedido`, de Ajuda ▸ Procurar atualização) e mostra
+    /// o aviso quando tem versão nova.
+    pub fn quadro(&mut self, ctx: &egui::Context, nome: &str, pedido: bool) {
+        self.conferir(ctx, pedido);
         let estado = self.pegar();
         if matches!(estado, Estado::Nada) || (self.dispensado && matches!(estado, Estado::Disponivel { .. })) {
             return;
@@ -117,12 +142,12 @@ impl Atualizador {
             .id(egui::Id::unique("arcano_atualizacao"))
             .collapsible(false)
             .resizable(false)
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -16.0))
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(16.0, -16.0))
             .show(ctx, |ui| {
                 ui.set_max_width(320.0);
                 match &estado {
-                    Estado::Disponivel { arquivo, .. } => {
-                        ui.label(format!("Tem uma versão nova do {nome}."));
+                    Estado::Disponivel { arquivo, build } => {
+                        ui.label(format!("Tem uma versão nova do {nome} (versão {build}; a sua é a {}).", esta()));
                         ui.label(egui::RichText::new("Salve o seu projeto antes: o programa fecha para atualizar.").size(12.0).weak());
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
@@ -140,8 +165,14 @@ impl Atualizador {
                         ui.label("Baixando a versão nova…");
                         ui.add(egui::ProgressBar::new(p).show_percentage());
                     }
+                    Estado::EmDia => {
+                        ui.label(format!("Você já está na versão mais nova do {nome} (versão {}).", esta()));
+                        if ui.button("Fechar").clicked() {
+                            *self.estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Estado::Nada;
+                        }
+                    }
                     Estado::Erro(e) => {
-                        ui.label(format!("Não consegui baixar a atualização: {e}"));
+                        ui.label(format!("Atualização: {e} (sua versão: {}).", esta()));
                         if ui.button("Fechar").clicked() {
                             *self.estado.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Estado::Nada;
                         }
