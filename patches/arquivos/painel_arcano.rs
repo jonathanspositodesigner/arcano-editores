@@ -339,6 +339,24 @@ impl Painel {
         if self.so_ferramentas {
             construtor = construtor.with_initialization_script(SCRIPT_SO_FERRAMENTAS);
         }
+        // 06/11/2026: o painel fica ESCONDIDO sempre que a aba dele não está na frente (ou um menu/janela
+        // cobre o lugar). Página escondida = o Chromium do WebView2 trava os timers (1 por segundo e, depois
+        // de ~5 min, 1 por MINUTO). A ponte do plugin com o Claude Code (eventos do conector, respostas do
+        // servidor MCP, saída do processo) roda nesses timers: a resposta ao "initialize" passava do prazo e
+        // o Claude Code dizia "não conectou às ferramentas (status failed)". As mesmas chaves que o Electron
+        // usa em `backgroundThrottling: false`; a pasta de dados é própria (exigência do WebView2 para
+        // argumentos diferentes do padrão). Mac: a política própria do WKWebView.
+        #[cfg(windows)]
+        {
+            use wry::WebViewBuilderExtWindows;
+            construtor = construtor.with_additional_browser_args(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows",
+            );
+        }
+        #[cfg(target_os = "macos")]
+        {
+            construtor = construtor.with_background_throttling(wry::BackgroundThrottlingPolicy::Disabled);
+        }
         let r = construtor
             // recados do painel para o editor (barra rápida, conta)
             .with_ipc_handler(move |pedido: wry::http::Request<String>| {
