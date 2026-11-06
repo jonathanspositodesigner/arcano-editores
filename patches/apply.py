@@ -319,6 +319,8 @@ pub(crate) const GATE: &str =""")
     salvar_aep(r)
     pacote_e_ausentes(r)
     gpu_que_volta(r)
+    coletar_arquivos(r)
+    psd_uma_vez(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -699,6 +701,138 @@ def gpu_que_volta(r):
           "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n",
           "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n"
           "        #[cfg(not(target_arch = \"wasm32\"))]\n        crate::arcano_gpu::quadro(self, ctx, frame);\n")
+
+
+def coletar_arquivos(r):
+    """Arquivo ▸ Dependências ▸ Coletar arquivos (dono, 06/11/2026): o mesmo PSD importado camada por
+    camada era copiado uma vez por item (50 × 143 MB, nomes 50_49_48_...) lendo tudo na memória na
+    thread da janela (tela travada). Agora: cada arquivo uma vez, cópia em segundo plano com
+    progresso no painel Progresso (cancelável)."""
+    f = "crates/engine/src/cmd/file_more.rs"
+    troca(r, f, '    let protected = s.protected_files();\n    let mut used_names = BTreeSet::new();\n    let mut plan: Vec<(ItemId, Vec<(String, String)>)> = vec![];\n    for it in s.project.items.values() {\n        let ItemKind::Footage(f) = &it.kind else { continue };\n        if f.path.is_empty() {\n            continue;\n        }\n        let files: Vec<&String> = if f.sequence.is_empty() { vec![&f.path] } else { f.sequence.iter().collect() };\n        let mut pairs = vec![];\n        for src in files {\n            let mut name = std::path::Path::new(src).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "footage".into());\n            let mut k = 2;\n            while !used_names.insert(name.clone()) {\n                name = format!("{k}_{name}");\n                k += 1;\n            }\n            let dst = format!("{folder}/(Footage)/{name}");\n            // A file that is already where its copy goes stays (it is not copied onto itself).\n            if !crate::output_guard::same_file(std::path::Path::new(src), std::path::Path::new(&dst))\n                && let Some(source) = protected.find(std::path::Path::new(&dst))\n            {\n                return Err(EngineError::Other(format!("Nothing was collected. {}", source.refusal(&dst, crate::output_guard::Use::Export))));\n            }\n            pairs.push((src.clone(), dst));\n        }\n        plan.push((it.id, pairs));\n    }\n    if let Some(source) = protected.find(std::path::Path::new(&out)) {\n        return Err(EngineError::Other(format!("Nothing was collected. {}", source.refusal(&out, crate::output_guard::Use::Export))));\n    }\n    // Collect Files makes its folder (and the footage folder inside it).\n', '    let protected = s.protected_files();\n    let mut used_names = BTreeSet::new();\n    // Arcano: o MESMO arquivo usado por vários itens (um PSD importado camada por camada) é\n    // copiado UMA vez (antes: 50 itens do mesmo PSD = 50 cópias de 143 MB e nomes "50_49_48_...").\n    let mut destino_de: BTreeMap<String, String> = BTreeMap::new();\n    let mut plan: Vec<(ItemId, Vec<(String, String)>)> = vec![];\n    for it in s.project.items.values() {\n        let ItemKind::Footage(f) = &it.kind else { continue };\n        if f.path.is_empty() {\n            continue;\n        }\n        let files: Vec<&String> = if f.sequence.is_empty() { vec![&f.path] } else { f.sequence.iter().collect() };\n        let mut pairs = vec![];\n        for src in files {\n            if let Some(dst) = destino_de.get(src) {\n                pairs.push((src.clone(), dst.clone()));\n                continue;\n            }\n            let base = std::path::Path::new(src).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "footage".into());\n            let mut name = base.clone();\n            let mut k = 2;\n            while !used_names.insert(name.to_ascii_lowercase()) {\n                name = format!("{k}_{base}");\n                k += 1;\n            }\n            let dst = format!("{folder}/(Footage)/{name}");\n            // A file that is already where its copy goes stays (it is not copied onto itself).\n            if !crate::output_guard::same_file(std::path::Path::new(src), std::path::Path::new(&dst))\n                && let Some(source) = protected.find(std::path::Path::new(&dst))\n            {\n                return Err(EngineError::Other(format!("Nothing was collected. {}", source.refusal(&dst, crate::output_guard::Use::Export))));\n            }\n            destino_de.insert(src.clone(), dst.clone());\n            pairs.push((src.clone(), dst));\n        }\n        plan.push((it.id, pairs));\n    }\n    if let Some(source) = protected.find(std::path::Path::new(&out)) {\n        return Err(EngineError::Other(format!("Nothing was collected. {}", source.refusal(&out, crate::output_guard::Use::Export))));\n    }\n')
+    troca(r, f, '    #[cfg(not(target_arch = "wasm32"))]\n    std::fs::create_dir_all(format!("{folder}/(Footage)")).map_err(|e| EngineError::Other(format!("cannot create {folder}: {e}")))?;\n    let mut proj = (*s.project).clone();\n    let mut copied = 0;\n    let mut errors = vec![];\n    for (id, pairs) in plan {\n        let mut new_paths = vec![];\n        for (src, dst) in &pairs {\n            if crate::output_guard::same_file(std::path::Path::new(src), std::path::Path::new(dst)) {\n                copied += 1;\n            } else {\n                match s.services.read_file(src).and_then(|bytes| s.write_output_with(&protected, dst, &bytes).map_err(std::io::Error::other)) {\n                    Ok(()) => copied += 1,\n                    Err(e) => errors.push(format!("{src}: {e}")),\n                }\n            }\n            new_paths.push(dst.clone());\n        }\n        let Some(ItemKind::Footage(f)) = proj.items.get_mut(&id).map(|it| &mut it.kind) else { continue };\n        if f.sequence.is_empty() {\n            f.path = new_paths.pop().unwrap_or_default();\n        } else {\n            f.path = new_paths.first().cloned().unwrap_or_default();\n            f.sequence = new_paths;\n        }\n    }\n', '    // Arcano: a cópia roda em segundo plano (painel Progresso, com cancelar), arquivo por arquivo\n    // direto do disco (antes lia cada arquivo inteiro na memória e travava a janela até acabar).\n    let mut proj = (*s.project).clone();\n    for (id, pairs) in &plan {\n        let new_paths: Vec<String> = pairs.iter().map(|(_, d)| d.clone()).collect();\n        let Some(ItemKind::Footage(f)) = proj.items.get_mut(id).map(|it| &mut it.kind) else { continue };\n        if f.sequence.is_empty() {\n            f.path = new_paths.last().cloned().unwrap_or_default();\n        } else {\n            f.path = new_paths.first().cloned().unwrap_or_default();\n            f.sequence = new_paths;\n        }\n    }\n    let copias: Vec<(String, String)> = destino_de.into_iter().collect();\n    let projeto_json = proj.to_json();\n    let services = s.services.clone();\n    let wait = p.get("wait").and_then(Value::as_bool).unwrap_or(false);\n    let folder2 = folder.clone();\n    let out2 = out.clone();\n    let n = copias.len();\n    s.spawn_task("collectFiles", format!("Coletando arquivos ({n})"), wait, move |ctl| {\n        #[cfg(not(target_arch = "wasm32"))]\n        std::fs::create_dir_all(format!("{folder2}/(Footage)")).map_err(|e| format!("cannot create {folder2}: {e}"))?;\n        let total = copias.len() as u64;\n        let mut copied = 0usize;\n        let mut errors = vec![];\n        for (k, (src, dst)) in copias.iter().enumerate() {\n            if !ctl.progress(k as u64, total) {\n                return Err(crate::render_queue::CANCELLED.into());\n            }\n            ctl.message(std::path::Path::new(src).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default());\n            if crate::output_guard::same_file(std::path::Path::new(src), std::path::Path::new(dst)) {\n                copied += 1;\n                continue;\n            }\n            #[cfg(not(target_arch = "wasm32"))]\n            let r = std::fs::copy(src, dst).map(|_| ()).map_err(|e| e.to_string());\n            #[cfg(target_arch = "wasm32")]\n            let r = services.read_file(src).and_then(|b| services.write_file(dst, &b)).map_err(|e| e.to_string());\n            match r {\n                Ok(()) => copied += 1,\n                Err(e) => errors.push(format!("{src}: {e}")),\n            }\n        }\n        ctl.progress(total, total);\n        services.write_file(&out2, projeto_json.as_bytes()).map_err(|e| format!("cannot write {out2}: {e}"))?;\n        Ok(Box::new(move |s: &mut Session| {\n            s.toast(format!("Coletado: {copied} arquivo(s) em {folder2}{}", if errors.is_empty() { String::new() } else { format!(" ({} com erro)", errors.len()) }));\n            Ok(json!({"project": out2, "copied": copied, "errors": errors}))\n        }) as crate::jobs::Apply)\n    })\n}\n', todas=False)
+    troca(r, f, '    s.write_output_with(&protected, &out, proj.to_json().as_bytes())?;\n    s.toast(format!("Collected {copied} file(s) into {folder}"));\n    Ok(json!({"project": out, "copied": copied, "errors": errors}))\n}\n', '')
+
+
+def psd_uma_vez(r):
+    """PSD lido e interpretado UMA vez (dono, 06/11/2026, projeto "after de domingo"): cada camada
+    importada do mesmo PSD (50 itens do mesmo arquivo de 143 MB) relia o arquivo do disco, copiava
+    os 143 MB e interpretava o PSD inteiro de novo a cada decodificação; quando o cache de mídia
+    (1 GB) soltava uma camada, era tudo de novo (segundos por camada = "carrega um pouco e trava").
+    Agora o documento interpretado fica num cache (até 8 arquivos / 1,5 GB), achado pelo caminho +
+    tamanho + data SEM reler o arquivo, ou pelo conteúdo (cópias iguais do mesmo PSD, como as que o
+    Coletar arquivos antigo fazia); a camada só é extraída dele. Medido no projeto do dono (2 núcleos,
+    sem GPU): 1º quadro de 7,1 s → ver CLAUDE.md."""
+    lay = "crates/media/src/layered.rs"
+    troca(r, lay, "pub(crate) fn decode(path: &str, bytes: &[u8], footage: &Footage, op: AlphaOp) -> Result<Option<Image>> {\n    if effectcraft_psd::is_psd(bytes) {\n        let psd = effectcraft_psd::Psd::parse(bytes.to_vec()).map_err(|e| MediaError::Decode(format!(\"{path}: {e}\")))?;\n",
+          "/// Arcano: os PSDs interpretados, guardados por arquivo (caminho + tamanho + data) e por conteúdo\n"
+          "/// (tamanho + amostra dos bytes: cópias iguais do mesmo PSD contam uma vez): as camadas de um mesmo\n"
+          "/// documento saem do mesmo `Psd`, sem reler nem interpretar o arquivo de novo.\n"
+          "struct PsdGuardado {\n"
+          "    caminho: String,\n"
+          "    carimbo: u64,\n"
+          "    conteudo: u64,\n"
+          "    psd: std::sync::Arc<effectcraft_psd::Psd>,\n"
+          "    bytes: usize,\n"
+          "}\n"
+          "static PSDS_GUARDADOS: std::sync::Mutex<Vec<PsdGuardado>> = std::sync::Mutex::new(Vec::new());\n"
+          "const PSDS_MAXIMO: usize = 8;\n"
+          "const PSDS_BYTES_MAXIMO: usize = 1536 << 20;\n"
+          "fn carimbo_do_arquivo(path: &str) -> Option<u64> {\n"
+          "    #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "    {\n"
+          "        let m = std::fs::metadata(path).ok()?;\n"
+          "        let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos() as u64).unwrap_or(0);\n"
+          "        Some(m.len().rotate_left(17) ^ t)\n"
+          "    }\n"
+          "    #[cfg(target_arch = \"wasm32\")]\n"
+          "    {\n"
+          "        let _ = path;\n"
+          "        None\n"
+          "    }\n"
+          "}\n"
+          "fn conteudo_do_arquivo(bytes: &[u8]) -> u64 {\n"
+          "    use std::hash::{Hash, Hasher};\n"
+          "    let mut h = std::collections::hash_map::DefaultHasher::new();\n"
+          "    bytes.len().hash(&mut h);\n"
+          "    let n = bytes.len();\n"
+          "    let k = 64 << 10;\n"
+          "    bytes[..n.min(k)].hash(&mut h);\n"
+          "    if n > 2 * k {\n"
+          "        bytes[n / 2..(n / 2 + k).min(n)].hash(&mut h);\n"
+          "        bytes[n - k..].hash(&mut h);\n"
+          "    }\n"
+          "    h.finish()\n"
+          "}\n"
+          "fn psd_guardado_pelo_caminho(path: &str) -> Option<std::sync::Arc<effectcraft_psd::Psd>> {\n"
+          "    let carimbo = carimbo_do_arquivo(path)?;\n"
+          "    let mut g = PSDS_GUARDADOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+          "    let i = g.iter().position(|e| e.caminho == path && e.carimbo == carimbo)?;\n"
+          "    let e = g.remove(i);\n"
+          "    let psd = e.psd.clone();\n"
+          "    g.push(e);\n"
+          "    Some(psd)\n"
+          "}\n"
+          "fn psd_guardado(path: &str, bytes: &std::sync::Arc<[u8]>) -> Result<std::sync::Arc<effectcraft_psd::Psd>> {\n"
+          "    if let Some(p) = psd_guardado_pelo_caminho(path) {\n"
+          "        return Ok(p);\n"
+          "    }\n"
+          "    let carimbo = carimbo_do_arquivo(path).unwrap_or(bytes.len() as u64);\n"
+          "    let conteudo = conteudo_do_arquivo(bytes);\n"
+          "    let mut g = PSDS_GUARDADOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+          "    let psd = match g.iter().find(|e| e.conteudo == conteudo && e.bytes == bytes.len()) {\n"
+          "        Some(e) => e.psd.clone(),\n"
+          "        None => {\n"
+          "            drop(g);\n"
+          "            let p = std::sync::Arc::new(effectcraft_psd::Psd::parse(bytes.clone()).map_err(|e| MediaError::Decode(format!(\"{path}: {e}\")))?);\n"
+          "            g = PSDS_GUARDADOS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+          "            p\n"
+          "        }\n"
+          "    };\n"
+          "    g.retain(|e| e.caminho != path);\n"
+          "    g.push(PsdGuardado { caminho: path.to_string(), carimbo, conteudo, psd: psd.clone(), bytes: bytes.len() });\n"
+          "    // o mesmo documento por vários caminhos conta uma vez no limite de bytes\n"
+          "    let total = |g: &Vec<PsdGuardado>| {\n"
+          "        let mut vistos: Vec<*const effectcraft_psd::Psd> = Vec::new();\n"
+          "        g.iter().filter(|e| { let p = std::sync::Arc::as_ptr(&e.psd); if vistos.contains(&p) { false } else { vistos.push(p); true } }).map(|e| e.bytes).sum::<usize>()\n"
+          "    };\n"
+          "    while g.len() > PSDS_MAXIMO * 8 || (total(&g) > PSDS_BYTES_MAXIMO && g.len() > 1) {\n"
+          "        g.remove(0);\n"
+          "    }\n"
+          "    Ok(psd)\n"
+          "}\n"
+          "/// Arcano: decodifica uma camada de PSD já guardado SEM ler o arquivo (`None`: não guardado).\n"
+          "pub(crate) fn decode_psd_guardado(path: &str, footage: &Footage, op: AlphaOp) -> Option<Result<Image>> {\n"
+          "    let psd = psd_guardado_pelo_caminho(path)?;\n"
+          "    Some(decode_psd(path, &psd, footage, op))\n"
+          "}\n"
+          "fn decode_psd(path: &str, psd: &effectcraft_psd::Psd, footage: &Footage, op: AlphaOp) -> Result<Image> {\n"
+          "    {\n")
+    # o corpo antigo do ramo PSD vira o corpo de decode_psd: troca os `return Ok(Some(x))` por `return Ok(x)` e fecha
+    troca(r, lay, "            return Ok(Some(straight_to_image(px.width, px.height, &px.data, op)));\n        }\n        // A smart object's embedded file",
+          "            return Ok(straight_to_image(px.width, px.height, &px.data, op));\n        }\n        // A smart object's embedded file")
+    troca(r, lay, "                    return Ok(Some(straight_to_image(baked.width, baked.height, &baked.data, op)));\n",
+          "                    return Ok(straight_to_image(baked.width, baked.height, &baked.data, op));\n")
+    troca(r, lay, "            return Ok(Some(straight_to_image(px.width, px.height, &px.data, op)));\n        }\n        let px = match &footage.layer {",
+          "            return Ok(straight_to_image(px.width, px.height, &px.data, op));\n        }\n        let px = match &footage.layer {")
+    troca(r, lay, "        .map_err(|e| MediaError::Decode(format!(\"{path}: {e}\")))?;\n        return Ok(Some(straight_to_image(px.width, px.height, &px.data, op)));\n    }\n    if is_svg(path, bytes) || is_pdf_like(path, bytes) {",
+          "        .map_err(|e| MediaError::Decode(format!(\"{path}: {e}\")))?;\n        Ok(straight_to_image(px.width, px.height, &px.data, op))\n    }\n}\n"
+          "pub(crate) fn decode(path: &str, bytes: &std::sync::Arc<[u8]>, footage: &Footage, op: AlphaOp) -> Result<Option<Image>> {\n"
+          "    if effectcraft_psd::is_psd(bytes) {\n"
+          "        let psd = psd_guardado(path, bytes)?;\n"
+          "        return decode_psd(path, &psd, footage, op).map(Some);\n"
+          "    }\n"
+          "    if is_svg(path, bytes) || is_pdf_like(path, bytes) {")
+    # os testes passavam &[u8]: agora `decode` quer Arc<[u8]>
+    troca(r, lay, 'let e = decode("huge.svg", huge, &footage,', 'let e = decode("huge.svg", &std::sync::Arc::from(&huge[..]), &footage,')
+    troca(r, lay, 'let img = decode("small.svg", small, &footage,', 'let img = decode("small.svg", &std::sync::Arc::from(&small[..]), &footage,')
+    troca(r, "crates/media/src/pool.rs",
+          "        let bytes = self.read(path)?;\n        if let Some(img) = crate::dpx::decode(path, &bytes)? {",
+          "        // Arcano: PSD já interpretado: a camada sai dele sem reler o arquivo\n"
+          "        if let Some(r) = crate::layered::decode_psd_guardado(path, footage, op) {\n"
+          "            return r;\n"
+          "        }\n"
+          "        let bytes = self.read(path)?;\n        if let Some(img) = crate::dpx::decode(path, &bytes)? {")
 
 
 def projeto_after(r):
