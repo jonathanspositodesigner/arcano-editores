@@ -326,6 +326,8 @@ pub(crate) const GATE: &str =""")
     previa_guardada(r)
     destino_navegador(r)
     worker_que_tenta_de_novo(r)
+    worker_com_memoria_de_navegador(r)
+    caminho_do_navegador(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -937,6 +939,40 @@ def worker_que_tenta_de_novo(r):
           "    // The worker didn't start (#216): the job fails and the worker goes.\n    running.delete(id);\n    w.worker.terminate();\n    onMessage(\"error\", String(e.message || e), null, null);\n",
           "    // The worker didn't start (#216): the job fails and the worker goes.\n    w.worker.terminate();\n    if (deNovo(String(e.message || e))) { return; }\n"
           "    running.delete(id);\n    onMessage(\"error\", String(e.message || e), null, null);\n")
+
+
+def worker_com_memoria_de_navegador(r):
+    """Render no navegador caindo com "RuntimeError: unreachable" (projeto ARCANO • LED DJ GUUGA do dono,
+    06/11/2026, reproduzido aqui até sem GPU): o worker de render criava os caches com os padrões de PC
+    (mídia 1 GB + camadas do render 1 GB), fora o cache de PSD, o arquivo do projeto e a memória do
+    quadro; um quadro desse projeto passa de 3,5 GB e o worker do navegador tem 4 GB: estourava e o wasm
+    abortava. A página já usava os limites de navegador (WEB_LAYER_CACHE/WEB_MEDIA_CACHE); agora o worker e
+    o render também."""
+    troca(r, "apps/effectcraft-web/src/worker.rs",
+          "    let pool = Arc::new(effectcraft_media::MediaPool::new());\n    POOL.with(|p| *p.borrow_mut() = Some(pool.clone()));\n",
+          "    // Arcano: limite de navegador, igual ao da página (WEB_MEDIA_CACHE = 256 MB; antes 1 GB, o padrão de PC)\n"
+          "    let pool = Arc::new(effectcraft_media::MediaPool::with_budget(256 << 20));\n"
+          "    POOL.with(|p| *p.borrow_mut() = Some(pool.clone()));\n")
+    troca(r, "crates/export/src/pipeline.rs",
+          "        let cache = LayerCache::default();\n        // With deferred readbacks,",
+          "        // Arcano: no navegador o worker tem 4 GB pra tudo; o cache de camadas do render fica em 384 MB (antes 1 GB)\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n        let cache = LayerCache::new(384 << 20);\n"
+          "        #[cfg(not(target_arch = \"wasm32\"))]\n        let cache = LayerCache::default();\n        // With deferred readbacks,")
+
+
+def caminho_do_navegador(r):
+    """Projeto aberto no NAVEGADOR com tudo ausente (dono, 06/11/2026: o pacote com o PSD dentro abria
+    no PC certinho e no navegador com as barras coloridas): no wasm o Rust não acha "/Projetos/…/x.psd"
+    absoluto (Path::is_absolute = false, testado), a regra de caminhos recusava e marcava os 43 itens
+    como ausentes. No navegador "/…" é o caminho da tabela de arquivos: vale como está."""
+    troca(r, "crates/engine/src/footage/doc_path.rs",
+          "pub fn resolve(stored: &str, project: Option<&str>) -> Result<PathBuf, NotFollowed> {\n",
+          "pub fn resolve(stored: &str, project: Option<&str>) -> Result<PathBuf, NotFollowed> {\n"
+          "    // Arcano: no navegador \"/…\" é o caminho da tabela de arquivos (o std do wasm não o acha absoluto)\n"
+          "    #[cfg(target_arch = \"wasm32\")]\n"
+          "    if stored.starts_with('/') && !stored.starts_with(\"//\") && !stored.split('/').any(|c| c == \"..\") {\n"
+          "        return Ok(PathBuf::from(stored));\n"
+          "    }\n")
 
 
 def destino_navegador(r):
