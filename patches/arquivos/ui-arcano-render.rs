@@ -5,9 +5,10 @@
 use std::collections::HashSet;
 use std::sync::Mutex;
 
-use effectcraft_engine::project::render_queue::RenderQueueItem;
+use effectcraft_engine::project::render_queue::{RenderQueueItem, RenderStatus};
 use egui::{Align2, Rect, pos2, vec2};
 use serde_json::{Value, json};
+use web_time::{Duration, Instant};
 
 use crate::theme::Tokens;
 use crate::{EffectcraftApp, widgets};
@@ -86,5 +87,185 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
         }
     } else {
         lp.text(pos2(bt.min.x, r.center().y), Align2::LEFT_CENTER, "O vídeo vai para os Downloads do navegador", Tokens::ui(11.0), t.text_faint);
+    }
+    // depois de renderizado: abrir a pasta do vídeo (programa de PC)
+    if tem_janela && it.status == RenderStatus::Done && let Some(caminho) = it.last_output.clone() {
+        let pb = Rect::from_min_size(pos2(bt.max.x + 12.0, r.min.y + 3.0), vec2(150.0, r.height() - 6.0));
+        let b = ui.put(pb, egui::Button::new(egui::RichText::new("📂 Abrir pasta do vídeo").size(11.5)));
+        app.auto.add(&format!("renderQueue.item.{}.pasta", it.id), pb, "Abrir pasta do vídeo");
+        if b.clicked() {
+            abrir_pasta(&caminho);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- Abrir pasta / render concluído
+
+/// Abre a pasta do arquivo no Explorer/Finder com o arquivo selecionado (pedido do dono, 06/11/2026).
+pub fn abrir_pasta(caminho: &str) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = caminho;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let p = std::path::Path::new(caminho);
+        let r = if cfg!(target_os = "windows") {
+            // explorer /select,"C:\pasta\arquivo.mp4" (um argumento só, com a vírgula)
+            std::process::Command::new("explorer").arg(format!("/select,{}", p.display())).spawn().map(|_| ())
+        } else if cfg!(target_os = "macos") {
+            std::process::Command::new("open").arg("-R").arg(p).spawn().map(|_| ())
+        } else {
+            std::process::Command::new("xdg-open").arg(p.parent().unwrap_or(p)).spawn().map(|_| ())
+        };
+        if let Err(e) = r {
+            log::warn!("abrir a pasta de {caminho}: {e}");
+        }
+    }
+}
+
+struct Concluido {
+    /// a fila estava renderizando no último quadro
+    renderizando: bool,
+    /// (caminho do vídeo, quando terminou) do último render concluído, enquanto o aviso fica
+    aviso: Option<(String, Instant)>,
+    /// pedido de render esperando a GPU voltar: (parâmetros, prazo)
+    esperando_gpu: Option<(Value, Instant)>,
+}
+
+static CONCLUIDO: Mutex<Concluido> = Mutex::new(Concluido { renderizando: false, aviso: None, esperando_gpu: None });
+
+/// Quanto tempo o aviso "Render concluído" fica na tela.
+const AVISO_SEGUNDOS: u64 = 120;
+
+/// "GPU · 120 ms/quadro" (ou "Processador") para a barra de progresso.
+pub fn ritmo(pr: &effectcraft_engine::render_queue::JobState) -> String {
+    let onde = if pr.gpu { "GPU" } else { "Processador" };
+    if pr.done > 0 && pr.item_elapsed > 0.0 {
+        format!("   ·   {onde} · {:.0} ms/quadro", pr.item_elapsed * 1000.0 / pr.done as f64)
+    } else {
+        format!("   ·   {onde}")
+    }
+}
+
+/// Render pedido com a GPU da prévia caída ou ainda sendo montada de novo (programa de PC):
+/// segura o pedido até ela voltar (no máximo 20 s), senão o vídeo inteiro sairia pelo processador.
+/// `true`: o pedido ficou guardado (o chamador não executa agora).
+#[cfg(target_arch = "wasm32")]
+pub fn esperar_gpu(_app: &mut EffectcraftApp, _ctx: &egui::Context, _params: &Value) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn esperar_gpu(app: &mut EffectcraftApp, ctx: &egui::Context, params: &Value) -> bool {
+    if !app.session.project.settings.gpu_acceleration || app.session.accel.is_some() {
+        return false;
+    }
+    let caiu = app.gpu_failures.as_ref().and_then(|b| b.failure()).is_some_and(|f| !f.presentation_lost);
+    let montando = app.gpu_build.is_some();
+    if !caiu && !montando {
+        return false;
+    }
+    let mut g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if g.esperando_gpu.is_some() {
+        return true;
+    }
+    g.esperando_gpu = Some((params.clone(), Instant::now() + Duration::from_secs(20)));
+    drop(g);
+    crate::arcano_gpu::agora();
+    app.ui.status = "Esperando a placa de vídeo voltar para renderizar na GPU…".into();
+    ctx.request_repaint_after(Duration::from_millis(200));
+    true
+}
+
+/// A cada quadro: solta o render que esperava a GPU, e mostra "Render concluído" com o botão
+/// "Abrir pasta" quando a fila termina com um vídeo pronto.
+pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
+    // render esperando a GPU
+    let pendente = {
+        let mut g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        match &g.esperando_gpu {
+            Some((p, prazo)) if app.session.accel.is_some() || Instant::now() >= *prazo => {
+                let p = p.clone();
+                g.esperando_gpu = None;
+                Some(p)
+            }
+            Some(_) => {
+                crate::arcano_gpu::agora();
+                ctx.request_repaint_after(Duration::from_millis(200));
+                None
+            }
+            None => None,
+        }
+    };
+    if let Some(p) = pendente {
+        if app.session.accel.is_none() {
+            log::warn!("a GPU não voltou em 20 s: o render vai pelo processador");
+        }
+        if let Err(e) = crate::menus::invoke(app, ctx, "renderQueue.render", p) {
+            app.ui.status = e;
+        }
+    }
+    // fim do render → aviso
+    let renderizando = app.session.is_rendering();
+    let mut g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if g.renderizando && !renderizando {
+        let pronto = app
+            .session
+            .project
+            .render_queue
+            .iter()
+            .filter(|i| i.status == RenderStatus::Done && i.last_output.is_some())
+            .max_by_key(|i| i.started.unwrap_or(0))
+            .and_then(|i| i.last_output.clone());
+        if let Some(c) = pronto
+            && app.hooks.pick_save.is_some()
+        {
+            g.aviso = Some((c, Instant::now()));
+        }
+    }
+    g.renderizando = renderizando;
+    let Some((caminho, desde)) = g.aviso.clone() else { return };
+    if desde.elapsed() > Duration::from_secs(AVISO_SEGUNDOS) || renderizando {
+        g.aviso = None;
+        return;
+    }
+    drop(g);
+    let t = app.tokens;
+    let nome = std::path::Path::new(&caminho).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| caminho.clone());
+    let mut fechar = false;
+    let mut abrir = false;
+    egui::Area::new(egui::Id::unique("arcano_render_concluido"))
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-18.0, -18.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            egui::Frame::window(&ctx.style_of(ctx.theme()))
+                .fill(t.panel_bg)
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::same(14))
+                .show(ui, |ui| {
+                    ui.set_width(340.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("✅").size(18.0));
+                        ui.label(egui::RichText::new("Render concluído").size(14.0).strong().color(egui::Color32::from_gray(238)));
+                    });
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(&nome).size(12.0).color(t.text_dim));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("📂  Abrir pasta do arquivo").size(12.5)).clicked() {
+                            abrir = true;
+                        }
+                        if ui.button(egui::RichText::new("Fechar").size(12.0)).clicked() {
+                            fechar = true;
+                        }
+                    });
+                });
+        });
+    if abrir {
+        abrir_pasta(&caminho);
+    }
+    if abrir || fechar {
+        CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).aviso = None;
     }
 }

@@ -30,9 +30,19 @@ static ESTADO: Mutex<Estado> = Mutex::new(Estado { voltas: 0, tentar_em: None, c
 #[cfg(not(target_arch = "wasm32"))]
 const MAXIMO_DE_VOLTAS: u32 = 6;
 
-/// Memória de vídeo das camadas depois de `voltas` quedas: 384 MB → 192 → 96 → 64 (mínimo).
-pub fn orcamento_de_camadas(voltas: u32) -> usize {
-    ((384usize << 20) >> voltas.min(3)).max(64 << 20)
+/// Memória de vídeo das camadas: a base vem da memória da placa (`arcano_vram::orcamento_base`:
+/// um terço, 512 MB a 2 GB; sem saber, 768 MB), e cai pela metade a cada queda (`voltas`), até
+/// um oitavo (mínimo 64 MB).
+pub fn orcamento_de_camadas(placa: &str, voltas: u32) -> usize {
+    (effectcraft_gpu::arcano_vram::orcamento_base(placa) >> voltas.min(3)).max(64 << 20)
+}
+
+/// Alguém precisa da GPU já (um render pedido): a próxima volta é agora, sem o respiro.
+pub fn agora() {
+    let mut e = ESTADO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(t) = e.tentar_em.as_mut() {
+        *t = Instant::now();
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -71,7 +81,7 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context, frame: &eframe::Fra
     bridge.clear();
     app.gpu_failure_applied = None;
     app.gpu_checked = true;
-    log::warn!("montando o compositor da GPU de novo (volta {voltas}, {} MB de camadas)", orcamento_de_camadas(voltas) >> 20);
+    log::warn!("montando o compositor da GPU de novo (volta {voltas})");
     app.ui.status = format!("Religando a GPU da prévia (tentativa {voltas})...");
     if !app.spawn_gpu_build(ctx, rs) {
         // sem thread: monta aqui mesmo
@@ -81,10 +91,18 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context, frame: &eframe::Fra
     ctx.request_repaint();
 }
 
-/// Depois que um compositor foi montado (a 1ª vez ou numa volta): memória conforme as quedas.
+/// Depois que um compositor foi montado (a 1ª vez ou numa volta): memória de camadas conforme a
+/// placa e as quedas.
 pub fn ajustar(gpu: &effectcraft_gpu::Gpu) {
     let voltas = ESTADO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).voltas;
-    if voltas > 0 {
-        gpu.context().set_upload_budget(orcamento_de_camadas(voltas));
-    }
+    let placa = effectcraft_engine::render::Accelerator::name(gpu);
+    let bytes = orcamento_de_camadas(&placa, voltas);
+    gpu.context().set_upload_budget(bytes);
+    let dedicada = effectcraft_gpu::arcano_vram::memoria_dedicada(placa.rsplit_once(" (").map_or(placa.as_str(), |(a, _)| a));
+    log::info!(
+        "Arcano: cache de camadas da GPU = {} MB ({}; placa {placa}, memória dedicada {})",
+        bytes >> 20,
+        if voltas > 0 { format!("volta {voltas}") } else { "início".into() },
+        dedicada.map_or("desconhecida".to_string(), |m| format!("{} MB", m >> 20))
+    );
 }

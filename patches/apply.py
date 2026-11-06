@@ -321,6 +321,8 @@ pub(crate) const GATE: &str =""")
     gpu_que_volta(r)
     coletar_arquivos(r)
     psd_uma_vez(r)
+    gpu_camadas(r)
+    render_rapido(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -701,6 +703,144 @@ def gpu_que_volta(r):
           "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n",
           "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n"
           "        #[cfg(not(target_arch = \"wasm32\"))]\n        crate::arcano_gpu::quadro(self, ctx, frame);\n")
+
+
+def gpu_camadas(r):
+    """Render lento / prévia lenta (dono, 06/11/2026, medido): o cache de camadas da GPU é LRU puro.
+    Quando as camadas de UM quadro passam do orçamento (PSD de 50 camadas em 1080×1920 = ~500 MB
+    em RGBA f32; orçamento 384 MB), ele expulsa as mais antigas — que são exatamente as que o
+    próximo quadro usa primeiro — e a placa recebe TODAS as camadas de novo a cada quadro (o
+    próprio aviso do código: "re-uploads them every frame"). Agora: (1) nunca expulsa camada usada
+    no quadro atual; o que não cabe sobe sem ficar guardado (só a sobra reenvia); (2) o orçamento
+    vem da memória da placa (DXGI no Windows; arquivos/gpu-arcano-vram.rs): um terço, 512 MB a 2 GB
+    (RTX 3050 de 6 GB → 2 GB, cabe o PSD inteiro); sem saber, 768 MB no PC e 384 MB no navegador."""
+    ctx = "crates/gpu/src/context.rs"
+    troca(r, ctx, "struct Upload {\n    buf: Weak<Buf>,\n    img: GpuImage,\n    bytes: usize,\n    last_use: u64,\n}\n",
+          "struct Upload {\n    buf: Weak<Buf>,\n    img: GpuImage,\n    bytes: usize,\n    last_use: u64,\n"
+          "    /// Arcano: o último quadro que usou esta camada (não é expulsa no quadro em que é usada).\n    quadro: u64,\n}\n")
+    troca(r, ctx, "struct Uploads {\n    map: HashMap<usize, Upload>,\n    bytes: usize,\n    clock: u64,\n}\n",
+          "struct Uploads {\n    map: HashMap<usize, Upload>,\n    bytes: usize,\n    clock: u64,\n"
+          "    /// Arcano: número do quadro em andamento (`novo_quadro`).\n    quadro: u64,\n}\n")
+    troca(r, ctx,
+          "    /// Upload a (layer cache) buffer, reusing the texture while the same `Arc` is alive: static\n"
+          "    /// layers upload once, not every frame.\n"
+          "    pub(crate) fn upload_buf(&self, buf: &Arc<Buf>) -> Option<GpuImage> {\n",
+          "    /// Arcano: começa um quadro novo do compositor (as camadas usadas a partir daqui ficam\n"
+          "    /// protegidas da expulsão até o próximo quadro).\n"
+          "    pub(crate) fn novo_quadro(&self) {\n"
+          "        if let Ok(mut u) = self.uploads.lock() {\n            u.quadro += 1;\n        }\n    }\n"
+          "    /// Upload a (layer cache) buffer, reusing the texture while the same `Arc` is alive: static\n"
+          "    /// layers upload once, not every frame.\n"
+          "    pub(crate) fn upload_buf(&self, buf: &Arc<Buf>) -> Option<GpuImage> {\n")
+    troca(r, ctx,
+          "            if let Some(e) = u.map.get_mut(&key)\n                && e.buf.upgrade().is_some_and(|b| Arc::ptr_eq(&b, buf))\n            {\n                e.last_use = now;\n                return Some(e.img.clone());\n            }\n",
+          "            let quadro_atual = u.quadro;\n            if let Some(e) = u.map.get_mut(&key)\n                && e.buf.upgrade().is_some_and(|b| Arc::ptr_eq(&b, buf))\n            {\n                e.last_use = now;\n                e.quadro = quadro_atual;\n                return Some(e.img.clone());\n            }\n")
+    troca(r, ctx,
+          "            let bytes = buf.img.data.len() * 16;\n            let now = u.clock;\n            if let Some(old) = u.map.insert(key, Upload { buf: Arc::downgrade(buf), img: img.clone(), bytes, last_use: now }) {\n                u.bytes -= old.bytes;\n            }\n            u.bytes += bytes;\n",
+          "            let bytes = buf.img.data.len() * 16;\n            let now = u.clock;\n            let quadro = u.quadro;\n"
+          "            // Arcano: expulsa primeiro o que já não tem dono, depois o que NÃO foi usado neste quadro;\n"
+          "            // se mesmo assim esta camada não cabe, ela sobe sem ficar guardada (a textura vive só\n"
+          "            // até o fim do quadro). Antes, o LRU puro expulsava as camadas deste mesmo quadro e a\n"
+          "            // placa recebia todas de novo a cada quadro.\n"
+          "            let budget = self.upload_budget();\n"
+          "            let dead: Vec<usize> = u.map.iter().filter(|(_, e)| e.buf.strong_count() == 0).map(|(k, _)| *k).collect();\n"
+          "            for k in dead {\n                if let Some(e) = u.map.remove(&k) {\n                    u.bytes -= e.bytes;\n                }\n            }\n"
+          "            while u.bytes + bytes > budget {\n"
+          "                let Some(k) = u.map.iter().filter(|(_, e)| e.quadro < quadro).min_by_key(|(_, e)| e.last_use).map(|(k, _)| *k) else { break };\n"
+          "                if let Some(e) = u.map.remove(&k) {\n                    u.bytes -= e.bytes;\n                }\n            }\n"
+          "            if u.bytes + bytes > budget {\n"
+          "                if !self.upload_full_warned.swap(true, std::sync::atomic::Ordering::Relaxed) {\n"
+          "                    log::warn!(target: \"effectcraft_gpu\", \"GPU upload cache full ({} MB): as camadas deste quadro passam dele; a sobra sobe de novo a cada quadro\", budget >> 20);\n"
+          "                }\n"
+          "                return Some(img);\n"
+          "            }\n"
+          "            if let Some(old) = u.map.insert(key, Upload { buf: Arc::downgrade(buf), img: img.clone(), bytes, last_use: now, quadro }) {\n                u.bytes -= old.bytes;\n            }\n            u.bytes += bytes;\n")
+    # o trecho antigo de expulsão (LRU puro) sai
+    troca(r, ctx,
+          "            // Drop textures of freed buffers at once (a layer whose buffer changes every frame\n"
+          "            // makes a new one each time, and nothing can hit the old one again), then the least\n"
+          "            // recently used over budget.\n"
+          "            let budget = self.upload_budget();\n"
+          "            let dead: Vec<usize> = u.map.iter().filter(|(_, e)| e.buf.strong_count() == 0).map(|(k, _)| *k).collect();\n"
+          "            for k in dead {\n                if let Some(e) = u.map.remove(&k) {\n                    u.bytes -= e.bytes;\n                }\n            }\n"
+          "            if u.bytes > budget && !self.upload_full_warned.swap(true, std::sync::atomic::Ordering::Relaxed) {\n"
+          "                log::warn!(\n                    target: \"effectcraft_gpu\",\n"
+          "                    \"GPU upload cache full ({} MB): evicting layer textures, which upload again when next used; a frame whose static layers exceed it re-uploads them every frame\",\n"
+          "                    budget >> 20\n                );\n            }\n"
+          "            while u.bytes > budget {\n"
+          "                let Some(k) = u.map.iter().min_by_key(|(_, e)| e.last_use).map(|(k, _)| *k) else { break };\n"
+          "                if let Some(e) = u.map.remove(&k) {\n                    u.bytes -= e.bytes;\n                }\n            }\n",
+          "")
+    # todo quadro do compositor (prévia e render) começa um quadro novo do cache
+    troca(r, "crates/gpu/src/walk.rs",
+          "    let ctx = r.eval_ctx(comp_id, t)?;\n    let (w, h) = effectcraft_render::frame_size(ctx.comp.width, ctx.comp.height, r.opts.scale);\n    if r.depth() > 16 || !e.g.fits(w, h) {\n",
+          "    let ctx = r.eval_ctx(comp_id, t)?;\n    e.g.novo_quadro();\n    let (w, h) = effectcraft_render::frame_size(ctx.comp.width, ctx.comp.height, r.opts.scale);\n    if r.depth() > 16 || !e.g.fits(w, h) {\n")
+    # memória da placa (DXGI no Windows): crate próprio (o workspace proíbe `unsafe`, e o DXGI precisa)
+    d = pathlib.Path(r) / "crates/arcano-vram"
+    (d / "src").mkdir(parents=True, exist_ok=True)
+    copia(pathlib.Path(__file__).parent / "arquivos/gpu-arcano-vram.rs", d / "src/lib.rs")
+    (d / "Cargo.toml").write_text(
+        '[package]\nname = "arcano-vram"\ndescription = "Arcano: memória da placa de vídeo (DXGI no Windows)"\n'
+        'version.workspace = true\nedition.workspace = true\nlicense.workspace = true\nrust-version.workspace = true\n'
+        '[dependencies]\n'
+        "[target.'cfg(windows)'.dependencies]\n"
+        'windows = { version = "0.62", features = ["Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common"] }\n', encoding="utf-8")
+    print("ok  crates/arcano-vram")
+    troca(r, "crates/gpu/src/lib.rs", "mod adv3d;\n", "pub use arcano_vram;\nmod adv3d;\n")
+    troca(r, "crates/gpu/Cargo.toml", "[dependencies]\n", "[dependencies]\narcano-vram = { path = \"../arcano-vram\" }\n")
+
+
+def render_rapido(r):
+    """Render (dono, 06/11/2026: 12 min num vídeo que o After faz em 2–3): (1) "Abrir pasta do
+    arquivo" depois de renderizado (aviso no canto + botão na linha do item); (2) a barra mostra
+    se está na GPU ou no processador e os ms por quadro (fato medido, não chute); (3) render pedido
+    com a GPU caída/voltando espera ela (até 20 s) em vez de ir inteiro pelo processador; (4) H.264
+    com o preset Speed do encoder (medido aqui: 2,3× mais rápido que Balanced no mesmo bitrate)."""
+    # encoder H.264: Speed
+    troca(r, "crates/export/src/encode.rs",
+          "        cfg.format = filmcraft_h264enc::PacketFormat::LengthPrefixed;\n        cfg.aud = false;\n",
+          "        cfg.format = filmcraft_h264enc::PacketFormat::LengthPrefixed;\n        cfg.aud = false;\n"
+          "        // Arcano: Speed (medido: 2,3× mais rápido que Balanced; no bitrate do app a diferença visual é mínima)\n"
+          "        cfg.preset = filmcraft_h264enc::Preset::Speed;\n")
+    # a fila sabe se o render usa a GPU
+    rq = "crates/engine/src/render_queue.rs"
+    troca(r, rq, "    pub items_total: usize,\n    pub finished: bool,\n}\n",
+          "    pub items_total: usize,\n    pub finished: bool,\n    /// Arcano: os quadros vão pela GPU (compositor vivo e Mercury GPU ligado no projeto).\n    #[serde(default)]\n    pub gpu: bool,\n}\n")
+    troca(r, rq, "        let shared = Arc::new(JobShared::default());\n        if wait {\n",
+          "        let shared = Arc::new(JobShared::default());\n"
+          "        lock(&shared.state).gpu = work.accel.as_ref().is_some_and(|a| a.available()) && work.project.settings.gpu_acceleration;\n"
+          "        if wait {\n")
+    # painel: GPU/Processador + ms por quadro na barra; botão da pasta; espera da GPU; aviso no fim
+    pn = "crates/ui-egui/src/panels/render_queue.rs"
+    troca(r, pn, "        (Some(pr), Some(n)) if rendering => format!(\"Rendering “{n}”   {} / {} frames\", pr.done, pr.total),\n",
+          "        (Some(pr), Some(n)) if rendering => format!(\"Rendering “{n}”   {} / {} frames{}\", pr.done, pr.total, crate::arcano_render::ritmo(pr)),\n")
+    troca(r, "crates/ui-egui/src/menus/invoke.rs",
+          "            if id == \"renderQueue.render\" && params.get(\"wait\").is_none() {\n"
+          "                // The UI renders in the background; the panel shows progress.\n"
+          "                let mut p = params.clone();\n"
+          "                if let Some(m) = p.as_object_mut() {\n"
+          "                    m.insert(\"wait\".into(), json!(false));\n"
+          "                } else {\n"
+          "                    p = json!({\"wait\": false});\n"
+          "                }\n"
+          "                app.show_panel(PanelKind::RenderQueue);\n"
+          "                return app.session.execute(id, p).map_err(|e| e.to_string());\n",
+          "            if id == \"renderQueue.render\" && params.get(\"wait\").is_none() {\n"
+          "                // The UI renders in the background; the panel shows progress.\n"
+          "                let mut p = params.clone();\n"
+          "                if let Some(m) = p.as_object_mut() {\n"
+          "                    m.insert(\"wait\".into(), json!(false));\n"
+          "                } else {\n"
+          "                    p = json!({\"wait\": false});\n"
+          "                }\n"
+          "                app.show_panel(PanelKind::RenderQueue);\n"
+          "                if crate::arcano_render::esperar_gpu(app, ctx, &p) {\n"
+          "                    return Ok(json!({\"adiado\": true}));\n"
+          "                }\n"
+          "                return app.session.execute(id, p).map_err(|e| e.to_string());\n", todas=True)
+    troca(r, "crates/ui-egui/src/app/frame.rs",
+          "        crate::arcano_carregando::quadro(self, &ctx);\n",
+          "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_render::quadro(self, &ctx);\n")
 
 
 def coletar_arquivos(r):
