@@ -325,6 +325,7 @@ pub(crate) const GATE: &str =""")
     render_rapido(r)
     previa_guardada(r)
     destino_navegador(r)
+    worker_que_tenta_de_novo(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -895,6 +896,35 @@ def previa_guardada(r):
           "            if urgent {\n                c.insert(key, img);\n            } else {\n                c.insert_sem_tirar_outras(key, img);\n            }\n        }\n")
 
 
+def worker_que_tenta_de_novo(r):
+    """Render no navegador falhando no PC de outra pessoa (dono, 06/11/2026; sem mensagem): o render
+    roda num worker; se ele caía (memória, GPU que some, travamento), o item virava "Failed" na hora.
+    Agora: tenta de novo num worker NOVO (memória limpa; os workers eram reaproveitados e guardavam
+    todo arquivo já mandado) e, na 3ª vez, sem GPU. Só depois disso falha."""
+    h = "apps/effectcraft-web/js/host.js"
+    troca(r, h, "export function workerRun(id, json, files, base, onMessage) {\n  let w;\n  try {\n    w = idle.pop() ?? spawn(base);\n",
+          "export function workerRun(id, json, files, base, onMessage, tentativa = 0) {\n  let w;\n"
+          "  // Arcano: worker que caiu → de novo num worker novo (memória limpa); na 3ª vez, sem GPU\n"
+          "  const deNovo = (motivo) => {\n"
+          "    if (tentativa >= 2 || !running.has(id)) { return false; }\n"
+          "    running.delete(id);\n"
+          "    console.warn(\"[Arcano] o trabalho caiu no worker (\" + motivo + \"): tentando de novo (\" + (tentativa + 2) + \"/3)\");\n"
+          "    const gpuAntes = jobWorkerGpu;\n"
+          "    if (tentativa >= 1) { jobWorkerGpu = false; }\n"
+          "    try { workerRun(id, json, files, base, onMessage, tentativa + 1); } finally { jobWorkerGpu = gpuAntes; }\n"
+          "    return true;\n"
+          "  };\n"
+          "  try {\n    w = (tentativa > 0 ? null : idle.pop()) ?? spawn(base);\n")
+    troca(r, h,
+          "    w.worker.onerror = (e) => {\n      running.delete(id);\n      onMessage(\"error\", String(e.message || \"worker error\"), null, null);\n      w.worker.terminate();\n    };\n",
+          "    w.worker.onerror = (e) => {\n      w.worker.terminate();\n      if (deNovo(String(e.message || \"worker error\"))) { return; }\n"
+          "      running.delete(id);\n      onMessage(\"error\", String(e.message || \"worker error\"), null, null);\n    };\n")
+    troca(r, h,
+          "    // The worker didn't start (#216): the job fails and the worker goes.\n    running.delete(id);\n    w.worker.terminate();\n    onMessage(\"error\", String(e.message || e), null, null);\n",
+          "    // The worker didn't start (#216): the job fails and the worker goes.\n    w.worker.terminate();\n    if (deNovo(String(e.message || e))) { return; }\n"
+          "    running.delete(id);\n    onMessage(\"error\", String(e.message || e), null, null);\n")
+
+
 def destino_navegador(r):
     """Navegador: "Escolher onde salvar" abre a janela Salvar como do navegador (Chrome/Edge) e o
     render é gravado lá (arquivos/web-arcano-destino.rs); antes o botão só trocava um nome interno."""
@@ -941,8 +971,11 @@ def psd_uma_vez(r):
           "    bytes: usize,\n"
           "}\n"
           "static PSDS_GUARDADOS: std::sync::Mutex<Vec<PsdGuardado>> = std::sync::Mutex::new(Vec::new());\n"
-          "const PSDS_MAXIMO: usize = 8;\n"
-          "const PSDS_BYTES_MAXIMO: usize = 1536 << 20;\n"
+          "// navegador: a memória do wasm é curta (4 GB por página/worker, com os arquivos e caches juntos)\n"
+          "#[cfg(not(target_arch = \"wasm32\"))]\nconst PSDS_MAXIMO: usize = 8;\n"
+          "#[cfg(not(target_arch = \"wasm32\"))]\nconst PSDS_BYTES_MAXIMO: usize = 1536 << 20;\n"
+          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_MAXIMO: usize = 2;\n"
+          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_BYTES_MAXIMO: usize = 384 << 20;\n"
           "fn carimbo_do_arquivo(path: &str) -> Option<u64> {\n"
           "    #[cfg(not(target_arch = \"wasm32\"))]\n"
           "    {\n"

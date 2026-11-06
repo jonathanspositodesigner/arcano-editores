@@ -158,9 +158,11 @@ struct Concluido {
     aviso: Option<(String, Instant)>,
     /// pedido de render esperando a GPU voltar: (parâmetros, prazo)
     esperando_gpu: Option<(Value, Instant)>,
+    /// render que falhou: (composição, motivo) — janela com o motivo, até fechar
+    falha: Option<(String, String)>,
 }
 
-static CONCLUIDO: Mutex<Concluido> = Mutex::new(Concluido { renderizando: false, aviso: None, esperando_gpu: None });
+static CONCLUIDO: Mutex<Concluido> = Mutex::new(Concluido { renderizando: false, aviso: None, esperando_gpu: None, falha: None });
 
 /// Quanto tempo o aviso "Render concluído" fica na tela.
 const AVISO_SEGUNDOS: u64 = 120;
@@ -237,22 +239,33 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let renderizando = app.session.is_rendering();
     let mut g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if g.renderizando && !renderizando {
-        let pronto = app
-            .session
-            .project
-            .render_queue
-            .iter()
-            .filter(|i| i.status == RenderStatus::Done && i.last_output.is_some())
-            .max_by_key(|i| i.started.unwrap_or(0))
-            .and_then(|i| i.last_output.clone());
-        if let Some(c) = pronto
-            && !cfg!(target_arch = "wasm32")
-            && app.hooks.pick_save.is_some()
-        {
-            g.aviso = Some((c, Instant::now()));
+        // o item que terminou por último (o mais recente a começar)
+        let ultimo = app.session.project.render_queue.iter().filter(|i| i.started.is_some()).max_by_key(|i| i.started.unwrap_or(0)).cloned();
+        if let Some(i) = ultimo {
+            match &i.status {
+                RenderStatus::Done => {
+                    if let Some(c) = i.last_output.clone()
+                        && !cfg!(target_arch = "wasm32")
+                        && app.hooks.pick_save.is_some()
+                    {
+                        g.aviso = Some((c, Instant::now()));
+                    }
+                }
+                RenderStatus::Failed(motivo) => {
+                    let nome = app.session.project.item(i.comp).map(|c| c.name.clone()).unwrap_or_default();
+                    log::error!("render falhou ({nome}): {motivo}");
+                    g.falha = Some((nome, motivo.clone()));
+                }
+                _ => {}
+            }
         }
     }
     g.renderizando = renderizando;
+    if let Some((nome, motivo)) = g.falha.clone() {
+        drop(g);
+        janela_de_falha(app, ctx, &nome, &motivo);
+        g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    }
     let Some((caminho, desde)) = g.aviso.clone() else { return };
     if desde.elapsed() > Duration::from_secs(AVISO_SEGUNDOS) || renderizando {
         g.aviso = None;
@@ -295,5 +308,42 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
     }
     if abrir || fechar {
         CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).aviso = None;
+    }
+}
+
+/// Janela "O render falhou" com o motivo (antes só num balãozinho na coluna Status) e "Copiar erro".
+fn janela_de_falha(app: &mut EffectcraftApp, ctx: &egui::Context, nome: &str, motivo: &str) {
+    let t = app.tokens;
+    let mut fechar = false;
+    egui::Modal::new(egui::Id::unique("arcano_render_falhou"))
+        .backdrop_color(egui::Color32::from_black_alpha(120))
+        .frame(egui::Frame::window(&ctx.style_of(ctx.theme())).fill(t.panel_bg).inner_margin(egui::Margin::same(18)))
+        .show(ctx, |ui| {
+            ui.set_width(480.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("⚠").size(20.0).color(egui::Color32::from_rgb(248, 113, 113)));
+                ui.label(egui::RichText::new("O render falhou").size(17.0).strong().color(egui::Color32::from_gray(238)));
+            });
+            ui.add_space(6.0);
+            if !nome.is_empty() {
+                ui.label(egui::RichText::new(format!("Composição: {nome}")).size(12.0).color(t.text_dim));
+            }
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                ui.label(egui::RichText::new(motivo).size(12.0).monospace().color(egui::Color32::from_gray(225)));
+            });
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if ui.button("📋  Copiar erro").clicked() {
+                    ui.ctx().copy_text(format!("Render falhou ({nome}): {motivo}"));
+                    app.ui.status = "Erro copiado.".into();
+                }
+                if ui.button("   OK   ").clicked() {
+                    fechar = true;
+                }
+            });
+        });
+    if fechar {
+        CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).falha = None;
     }
 }
