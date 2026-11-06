@@ -901,7 +901,19 @@ def worker_que_tenta_de_novo(r):
     roda num worker; se ele caía (memória, GPU que some, travamento), o item virava "Failed" na hora.
     Agora: tenta de novo num worker NOVO (memória limpa; os workers eram reaproveitados e guardavam
     todo arquivo já mandado) e, na 3ª vez, sem GPU. Só depois disso falha."""
+    # o motivo REAL do pânico (antes o worker só dizia "RuntimeError: unreachable": o wasm não imprime pânico)
+    troca(r, "apps/effectcraft-web/src/worker.rs",
+          "pub fn worker_init() {\n    crate::set_worker();\n    eframe::WebLogger::init(log::LevelFilter::Info).ok();\n",
+          "pub fn worker_init() {\n    crate::set_worker();\n    eframe::WebLogger::init(log::LevelFilter::Info).ok();\n"
+          "    // Arcano: o texto do pânico vai para a página (janela \"O render falhou\") antes do wasm parar\n"
+          "    std::panic::set_hook(Box::new(|info| {\n"
+          "        let texto = format!(\"{info}\");\n"
+          "        log::error!(\"pânico no worker: {texto}\");\n"
+          "        post(&obj(&[(\"type\", \"panico\".into()), (\"texto\", texto.as_str().into())]), None);\n"
+          "    }));\n")
     h = "apps/effectcraft-web/js/host.js"
+    troca(r, h, "      } else if (m.type === \"stats\") {\n",
+          "      } else if (m.type === \"panico\") {\n        w.panico = String(m.texto || \"\");\n      } else if (m.type === \"stats\") {\n")
     troca(r, h, "export function workerRun(id, json, files, base, onMessage) {\n  let w;\n  try {\n    w = idle.pop() ?? spawn(base);\n",
           "export function workerRun(id, json, files, base, onMessage, tentativa = 0) {\n  let w;\n"
           "  // Arcano: worker que caiu → de novo num worker novo (memória limpa); na 3ª vez, sem GPU\n"
@@ -917,8 +929,10 @@ def worker_que_tenta_de_novo(r):
           "  try {\n    w = (tentativa > 0 ? null : idle.pop()) ?? spawn(base);\n")
     troca(r, h,
           "    w.worker.onerror = (e) => {\n      running.delete(id);\n      onMessage(\"error\", String(e.message || \"worker error\"), null, null);\n      w.worker.terminate();\n    };\n",
-          "    w.worker.onerror = (e) => {\n      w.worker.terminate();\n      if (deNovo(String(e.message || \"worker error\"))) { return; }\n"
-          "      running.delete(id);\n      onMessage(\"error\", String(e.message || \"worker error\"), null, null);\n    };\n")
+          "    w.worker.onerror = (e) => {\n      w.worker.terminate();\n"
+          "      const motivo = w.panico ? (\"erro interno: \" + w.panico) : String(e.message || \"worker error\");\n"
+          "      if (deNovo(motivo)) { return; }\n"
+          "      running.delete(id);\n      onMessage(\"error\", motivo, null, null);\n    };\n")
     troca(r, h,
           "    // The worker didn't start (#216): the job fails and the worker goes.\n    running.delete(id);\n    w.worker.terminate();\n    onMessage(\"error\", String(e.message || e), null, null);\n",
           "    // The worker didn't start (#216): the job fails and the worker goes.\n    w.worker.terminate();\n    if (deNovo(String(e.message || e))) { return; }\n"
