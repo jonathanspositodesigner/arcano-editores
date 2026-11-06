@@ -76,8 +76,26 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
     // onde salvar
     let bt = Rect::from_min_size(pos2(dd.max.x + 12.0, r.min.y + 3.0), vec2(170.0, r.height() - 6.0));
     let destino = app.session.resolve_output(it).unwrap_or_default();
-    let tem_janela = app.hooks.pick_save.is_some();
-    if tem_janela {
+    // no navegador o pick_save existe mas só devolve um nome interno (não abre janela nenhuma)
+    let tem_janela = !cfg!(target_arch = "wasm32") && app.hooks.pick_save.is_some();
+    let web = DESTINO_WEB.get().filter(|_| cfg!(target_arch = "wasm32"));
+    if let Some(d) = web {
+        // navegador (Chrome/Edge): a janela de salvar do próprio navegador; o vídeo vai direto para lá
+        let nome = std::path::Path::new(&destino).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let escolhido = (d.escolhido)(&nome);
+        if (d.pode)() {
+            let b = ui.put(bt, egui::Button::new(egui::RichText::new("📁 Escolher onde salvar").size(11.5)));
+            app.auto.add(&format!("renderQueue.item.{}.escolher", it.id), bt, "Escolher onde salvar");
+            if b.clicked() && !rendering && !nome.is_empty() {
+                (d.escolher)(&nome);
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+            }
+            let texto = if escolhido.is_empty() { "Sem escolher: vai para os Downloads".to_string() } else { format!("Salva em: {escolhido}") };
+            lp.text(pos2(bt.max.x + 10.0, r.center().y), Align2::LEFT_CENTER, texto, Tokens::ui(11.0), t.text_faint);
+        } else {
+            lp.text(pos2(bt.min.x, r.center().y), Align2::LEFT_CENTER, "O vídeo vai para os Downloads (para escolher a pasta, use o Chrome ou o Edge)", Tokens::ui(11.0), t.text_faint);
+        }
+    } else if tem_janela {
         let b = ui.put(bt, egui::Button::new(egui::RichText::new("📁 Escolher onde salvar").size(11.5)));
         app.auto.add(&format!("renderQueue.item.{}.escolher", it.id), bt, "Escolher onde salvar");
         if b.clicked() && !rendering
@@ -98,6 +116,15 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
         }
     }
 }
+
+/// Navegador: a janela "Salvar como" do navegador (File System Access, Chrome/Edge), ligada pelo
+/// effectcraft-web (`arcano_destino.rs`). Chave = nome do arquivo de saída.
+pub struct DestinoWeb {
+    pub pode: fn() -> bool,
+    pub escolher: fn(&str) -> bool,
+    pub escolhido: fn(&str) -> String,
+}
+pub static DESTINO_WEB: std::sync::OnceLock<DestinoWeb> = std::sync::OnceLock::new();
 
 // ---------------------------------------------------------------- Abrir pasta / render concluído
 
@@ -219,6 +246,7 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
             .max_by_key(|i| i.started.unwrap_or(0))
             .and_then(|i| i.last_output.clone());
         if let Some(c) = pronto
+            && !cfg!(target_arch = "wasm32")
             && app.hooks.pick_save.is_some()
         {
             g.aviso = Some((c, Instant::now()));

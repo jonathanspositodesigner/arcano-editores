@@ -323,6 +323,8 @@ pub(crate) const GATE: &str =""")
     psd_uma_vez(r)
     gpu_camadas(r)
     render_rapido(r)
+    previa_guardada(r)
+    destino_navegador(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -844,6 +846,66 @@ def render_rapido(r):
     troca(r, "crates/ui-egui/src/app/frame.rs",
           "        crate::arcano_carregando::quadro(self, &ctx);\n",
           "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_render::quadro(self, &ctx);\n")
+
+
+def previa_guardada(r):
+    """Prévia que some ao trocar de composição (dono, 06/11/2026, PC e navegador): (1) o cache de
+    prévia tinha 3 GB fixos (quadros em ponto flutuante, 16 B/px: 1080×1920 em 1/2 = ~8 MB por
+    quadro, ~12 s de vídeo); no PC, com o valor padrão, passa a ser 40% da RAM (48 GB → ~19 GB),
+    dentro do teto que o editor já confere (RAM menos a reserva); (2) quadro feito em segundo plano
+    (adiantar/cache quando ocioso) nunca expulsa quadro de OUTRA composição: só os da própria; se
+    não couber, ele não fica. Só o quadro que você está vendo pode expulsar outros (o mais antigo)."""
+    troca(r, "crates/engine/src/settings/prefs/queries.rs",
+          "        let (mut l, mut m, mut p) = (self.layer_cache_bytes() as u64, self.media_cache_bytes() as u64, self.preview_cache_bytes() as u64);\n",
+          "        let (mut l, mut m, mut p) = (self.layer_cache_bytes() as u64, self.media_cache_bytes() as u64, self.preview_cache_bytes() as u64);\n"
+          "        // Arcano: com o valor padrão (3 GB), no PC a prévia usa 40% da RAM (a troca de composição não apaga a outra)\n"
+          "        if !web && p == 3072 << 20 && let Some(t) = mem.as_ref().map(|m| m.total).filter(|t| *t > 0) {\n"
+          "            p = p.max(t / 5 * 2);\n"
+          "        }\n")
+    f = "crates/ui-egui/src/frames.rs"
+    troca(r, f,
+          "impl Cache {\n    fn insert(&mut self, k: FrameKey, img: FrameImage) {\n",
+          "impl Cache {\n"
+          "    /// Arcano: quadro feito em segundo plano (não é o da tela): só expulsa quadros da MESMA\n"
+          "    /// composição (o mais antigo); se só sobrar de outras, ele mesmo sai. A prévia de uma\n"
+          "    /// composição não some mais ao trocar para outra (o cache ocioso da nova enchia e a apagava).\n"
+          "    fn insert_sem_tirar_outras(&mut self, k: FrameKey, img: FrameImage) {\n"
+          "        let (sz, gpu) = (img.bytes(), img.is_gpu());\n"
+          "        if let Some(old) = self.map.insert(k, img) {\n            self.forget(&old);\n        } else {\n            self.order.push_back(k);\n        }\n"
+          "        self.bytes += sz;\n        if gpu {\n            self.gpu_bytes += sz;\n        }\n"
+          "        while self.bytes > self.budget || self.gpu_bytes > self.gpu_budget {\n"
+          "            let so_gpu = self.bytes <= self.budget;\n"
+          "            let i = self.order.iter().position(|o| o.content == k.content && *o != k && (!so_gpu || self.map.get(o).is_some_and(FrameImage::is_gpu)));\n"
+          "            let alvo = match i.and_then(|i| self.order.remove(i)) {\n"
+          "                Some(o) => o,\n"
+          "                None => {\n"
+          "                    // só há quadros de outras composições: este não fica\n"
+          "                    if let Some(j) = self.order.iter().rposition(|o| *o == k) {\n                        self.order.remove(j);\n                    }\n"
+          "                    k\n"
+          "                }\n"
+          "            };\n"
+          "            self.remove(&alvo);\n"
+          "            if alvo == k {\n                break;\n            }\n"
+          "        }\n"
+          "    }\n"
+          "    fn insert(&mut self, k: FrameKey, img: FrameImage) {\n")
+    troca(r, f,
+          "        if let Ok(mut c) = self.cache.lock()\n            && (!img.is_gpu() || !self.gpu_retired.load(Ordering::Acquire))\n        {\n            c.insert(key, img);\n        }\n",
+          "        if let Ok(mut c) = self.cache.lock()\n            && (!img.is_gpu() || !self.gpu_retired.load(Ordering::Acquire))\n        {\n"
+          "            if urgent {\n                c.insert(key, img);\n            } else {\n                c.insert_sem_tirar_outras(key, img);\n            }\n        }\n")
+
+
+def destino_navegador(r):
+    """Navegador: "Escolher onde salvar" abre a janela Salvar como do navegador (Chrome/Edge) e o
+    render é gravado lá (arquivos/web-arcano-destino.rs); antes o botão só trocava um nome interno."""
+    copia(pathlib.Path(__file__).parent / "arquivos/web-arcano-destino.rs", pathlib.Path(r) / "apps/effectcraft-web/src/arcano_destino.rs")
+    troca(r, "apps/effectcraft-web/src/lib.rs", "pub mod arcano_fontes;\n", "pub mod arcano_fontes;\npub mod arcano_destino;\n")
+    troca(r, "apps/effectcraft-web/src/app.rs", "    app.hooks.audio_device = Some(Box::new(audio::open));\n",
+          "    app.hooks.audio_device = Some(Box::new(audio::open));\n    crate::arcano_destino::ligar();\n")
+    troca(r, "apps/effectcraft-web/src/files.rs", "        1 => download(&out[0].0, &out[0].1),\n",
+          "        // Arcano: o lugar escolhido em \"Escolher onde salvar\" (senão, Downloads)\n"
+          "        1 if crate::arcano_destino::gravar(&out[0].0, &out[0].1) => Ok(()),\n"
+          "        1 => download(&out[0].0, &out[0].1),\n")
 
 
 def coletar_arquivos(r):
