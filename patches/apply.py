@@ -318,6 +318,7 @@ pub(crate) const GATE: &str =""")
     carregando(r)
     salvar_aep(r)
     pacote_e_ausentes(r)
+    gpu_que_volta(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -475,8 +476,12 @@ def memoria_video(r):
     disco C: quase cheio, e o programa fechou): o compositor guardava até ~2,5 GB fixos (camadas
     1,5 GB + texturas de trabalho 768 MB + leitura 256 MB), qualquer que fosse a placa. Agora metade."""
     ctx = "crates/gpu/src/context.rs"
-    troca(r, ctx, "const UPLOAD_BUDGET: usize = 1536 << 20;", "const UPLOAD_BUDGET: usize = 768 << 20;")
-    troca(r, ctx, "const POOL_BUDGET: usize = 768 << 20;", "const POOL_BUDGET: usize = 384 << 20;")
+    # 06/11: o registro do dono mostrou o cache de camadas CHEIO nos 768 MB e "Out of Memory" logo em
+    # seguida (RTX 3050). O cache da GPU é um espelho do cache de camadas da RAM: guarda textura de
+    # toda camada viva; a camada que sai dele só sobe de novo (2 MB cada num 1/4 de 1080p, barato).
+    # Menos memória fixa na placa, mais folga pro resto (janela, WebView do painel, outros programas).
+    troca(r, ctx, "const UPLOAD_BUDGET: usize = 1536 << 20;", "const UPLOAD_BUDGET: usize = 384 << 20;")
+    troca(r, ctx, "const POOL_BUDGET: usize = 768 << 20;", "const POOL_BUDGET: usize = 256 << 20;")
     troca(r, ctx, "const STAGING_BUDGET: u64 = 256 << 20;", "const STAGING_BUDGET: u64 = 128 << 20;")
 
 
@@ -645,6 +650,55 @@ def pacote_e_ausentes(r):
     troca(r, "crates/ui-egui/src/lib.rs", "pub mod arcano_carregando;\n", "pub mod arcano_ausentes;\npub mod arcano_carregando;\n")
     troca(r, "crates/ui-egui/src/app/frame.rs", "        crate::arcano_carregando::quadro(self, &ctx);\n",
           "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_ausentes::quadro(self, &ctx);\n")
+
+
+def gpu_que_volta(r):
+    """Prévia travando (dono, 06/11/2026: "carrega um pouquinho e fica horas travado, no 1/4"):
+    qualquer tropeço da placa (Out of Memory, leitura da GPU que passou de 10 s) APOSENTAVA o
+    compositor da GPU pelo resto da sessão e a prévia virava só processador. Agora: (1) leitura
+    que demora não aposenta mais a placa: só aquela leitura falha (o quadro vai pelo processador) e
+    o prazo é 45 s; (2) a GPU volta sozinha depois de cair (arquivos/ui-arcano-gpu.rs), com metade
+    da memória de camadas a cada volta."""
+    rb = "crates/gpu/src/readback.rs"
+    troca(r, rb, "pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);", "pub(crate) const TIMEOUT: Duration = Duration::from_secs(45);")
+    troca(r, rb,
+          "    if s.retired.is_some() || !s.pending.values().any(|e| now >= e.deadline) {\n"
+          "        return None;\n"
+          "    }\n"
+          "    s.retired = Some(TIMED_OUT.to_string());\n"
+          "    Some(std::mem::take(&mut s.pending).into_values().collect())\n",
+          "    if s.retired.is_some() || !s.pending.values().any(|e| now >= e.deadline) {\n"
+          "        return None;\n"
+          "    }\n"
+          "    // Arcano: a leitura que passou do prazo falha sozinha (o quadro vai pelo processador);\n"
+          "    // a placa continua em uso. Antes aposentava o compositor inteiro pela sessão.\n"
+          "    let vencidas: Vec<u64> = s.pending.iter().filter(|(_, e)| now >= e.deadline).map(|(id, _)| *id).collect();\n"
+          "    Some(vencidas.into_iter().filter_map(|id| s.pending.remove(&id)).collect())\n")
+    # os testes do prazo esperavam a aposentadoria: agora a placa continua viva
+    troca(r, rb, "        assert!(me.check().is_err());\n", "        assert!(me.check().is_ok());\n", todas=True)
+    # a ponte de falha limpa (para a volta) e o spawn/attach ficam visíveis ao módulo novo
+    troca(r, "crates/ui-egui/src/gpu_failure.rs",
+          "    pub fn failure(&self) -> Option<GpuFailure> {\n",
+          "    /// Arcano: esquece a falha (a placa continua viva) para montar o compositor de novo.\n"
+          "    pub fn clear(&self) {\n"
+          "        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).failure = None;\n"
+          "    }\n"
+          "    pub fn failure(&self) -> Option<GpuFailure> {\n")
+    g = "crates/ui-egui/src/app/gpu.rs"
+    troca(r, g, "    fn spawn_gpu_build(&mut self, ctx: &egui::Context, rs: &eframe::egui_wgpu::RenderState) -> bool {",
+          "    pub(crate) fn spawn_gpu_build(&mut self, ctx: &egui::Context, rs: &eframe::egui_wgpu::RenderState) -> bool {")
+    troca(r, g, "    fn attach_gpu(&mut self, built: GpuBuild, rs: Option<&eframe::egui_wgpu::RenderState>) {",
+          "    pub(crate) fn attach_gpu(&mut self, built: GpuBuild, rs: Option<&eframe::egui_wgpu::RenderState>) {")
+    troca(r, g,
+          "                log::info!(\"GPU compositor: {}\", effectcraft_engine::render::Accelerator::name(&g));\n",
+          "                log::info!(\"GPU compositor: {}\", effectcraft_engine::render::Accelerator::name(&g));\n"
+          "                crate::arcano_gpu::ajustar(&g);\n")
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-gpu.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_gpu.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod arcano_carregando;\n", "pub mod arcano_carregando;\npub mod arcano_gpu;\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs",
+          "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n",
+          "        self.init_gpu(ctx, frame);\n        self.apply_gpu_failure(ctx);\n"
+          "        #[cfg(not(target_arch = \"wasm32\"))]\n        crate::arcano_gpu::quadro(self, ctx, frame);\n")
 
 
 def projeto_after(r):
