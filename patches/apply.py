@@ -317,6 +317,7 @@ pub(crate) const GATE: &str =""")
     projeto_after(r)
     carregando(r)
     salvar_aep(r)
+    pacote_e_ausentes(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -555,6 +556,95 @@ def salvar_aep(r):
           "        return Ok(Value::Null);\n"
           "    }\n"
           "    if crate::arcano_carregando::adiar(id, &params) {\n")
+
+
+def pacote_e_ausentes(r):
+    """Projeto com os ARQUIVOS DENTRO, igual ao PSD, e aviso de ARQUIVOS AUSENTES igual ao After
+    (pedido do dono, 05/11/2026). arquivos/engine-arcano-pacote.rs: Salvar grava o .ecproj como
+    pacote (zip sem compressão, zip64) com vídeos, imagens, áudios e fontes; Abrir tira de dentro
+    (ou usa o original, se ainda está igual). arquivos/ui-arcano-ausentes.rs: janela com o que
+    falta. O que falta aparece com barras coloridas (antes sumia sem aviso)."""
+    copia(pathlib.Path(__file__).parent / "arquivos/engine-arcano-pacote.rs", pathlib.Path(r) / "crates/engine/src/arcano_pacote.rs")
+    troca(r, "crates/engine/src/lib.rs", "pub mod arcano_aep;\n", "pub mod arcano_aep;\npub mod arcano_pacote;\n")
+    # Abrir: pacote → texto do projeto com as mídias fora
+    troca(r, "crates/engine/src/cmd/file.rs",
+          '    let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("cannot read {path}: {e}")))?;\n'
+          '    let text = String::from_utf8(bytes).map_err(|_| EngineError::Other("not a text project file".into()))?;\n',
+          '    // Arcano: projeto com os arquivos dentro (crate::arcano_pacote)\n'
+          '    let text = match crate::arcano_pacote::abrir(s, path) {\n'
+          '        Some(t) => t?,\n'
+          '        None => {\n'
+          '            let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("cannot read {path}: {e}")))?;\n'
+          '            String::from_utf8(bytes).map_err(|_| EngineError::Other("not a text project file".into()))?\n'
+          '        }\n'
+          '    };\n')
+    # Salvar (Salvar, Salvar como, Incrementar e salvar): pacote
+    troca(r, "crates/engine/src/cmd/file.rs",
+          "fn save_to(s: &mut Session, path: &str) -> Result<Value> {\n",
+          "fn save_to(s: &mut Session, path: &str) -> Result<Value> {\n"
+          "    // Arcano: o .ecproj leva os arquivos dentro, igual ao PSD (crate::arcano_pacote)\n"
+          "    if crate::arcano_pacote::empacotar(path) {\n"
+          "        return crate::arcano_pacote::salvar(s, path);\n"
+          "    }\n")
+    # Importar projeto (Arquivo ▸ Importar um .ecproj): também lê o pacote
+    troca(r, "crates/engine/src/cmd/import_project.rs",
+          '    let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("cannot read {path}: {e}")))?;\n'
+          '    let text = String::from_utf8(bytes).map_err(|_| bad(C, format!("{path} is not a text project file")))?;\n',
+          '    let text = match crate::arcano_pacote::abrir(s, path) {\n'
+          '        Some(t) => t?,\n'
+          '        None => {\n'
+          '            let bytes = s.services.read_file(path).map_err(|e| EngineError::Other(format!("cannot read {path}: {e}")))?;\n'
+          '            String::from_utf8(bytes).map_err(|_| bad(C, format!("{path} is not a text project file")))?\n'
+          '        }\n'
+          '    };\n')
+    # O que falta aparece com as barras coloridas, como no After (antes não aparecia nada)
+    troca(r, "crates/media/src/pool.rs",
+          "    fn frame_sized(&self, _item: ItemId, footage: &Footage, t: Tick, size: Option<(u32, u32)>, float: FloatCurve) -> Option<Arc<Image>> {\n"
+          "        if footage.missing {\n"
+          "            return None;\n"
+          "        }\n",
+          "    fn frame_sized(&self, _item: ItemId, footage: &Footage, t: Tick, size: Option<(u32, u32)>, float: FloatCurve) -> Option<Arc<Image>> {\n"
+          "        if footage.missing {\n"
+          "            // Arcano: arquivo ausente = barras coloridas, como no After Effects (antes sumia calado)\n"
+          "            if !footage.has_video {\n"
+          "                return None;\n"
+          "            }\n"
+          "            let (w, h) = size.unwrap_or((footage.width, footage.height));\n"
+          "            return Some(barras_de_ausente(w, h));\n"
+          "        }\n")
+    troca(r, "crates/media/src/pool.rs",
+          "#[derive(Clone, PartialEq, Eq, Hash)]\nstruct Key {\n",
+          "/// Arcano: as barras do arquivo ausente, guardadas por tamanho (não refaz a cada quadro).\n"
+          "fn barras_de_ausente(w: u32, h: u32) -> Arc<Image> {\n"
+          "    static GUARDADAS: std::sync::Mutex<Vec<((u32, u32), Arc<Image>)>> = std::sync::Mutex::new(Vec::new());\n"
+          "    let mut g = GUARDADAS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+          "    if let Some((_, i)) = g.iter().find(|(k, _)| *k == (w, h)) {\n"
+          "        return i.clone();\n"
+          "    }\n"
+          "    let i = Arc::new(colour_bars(w, h));\n"
+          "    if g.len() >= 4 {\n"
+          "        g.remove(0);\n"
+          "    }\n"
+          "    g.push(((w, h), i.clone()));\n"
+          "    i\n"
+          "}\n"
+          "#[derive(Clone, PartialEq, Eq, Hash)]\nstruct Key {\n")
+    troca(r, "crates/engine/src/footage/footage_check.rs",
+          's.toast(format!("{missing} footage item(s) missing (File ▸ Dependencies ▸ Relink Missing Footage…)"));',
+          's.toast(format!("{missing} arquivo(s) ausente(s): aparecem com barras coloridas até você localizar."));')
+    # Navegador: confere os arquivos ao abrir projeto (no PC já conferia)
+    # teste do psd_import: o TextInfo ganhou `runs` (psd_fiel) e o teste não compilava
+    troca(r, "crates/engine/src/interchange/psd_import.rs",
+          "            bounds: Some([0.0, 0.0, f64::INFINITY, 1.0]),\n        };\n",
+          "            bounds: Some([0.0, 0.0, f64::INFINITY, 1.0]),\n            runs: Vec::new(),\n        };\n")
+    troca(r, "apps/effectcraft-web/src/app.rs",
+          "                let mut session = session();\n                session.load_settings();\n",
+          "                let mut session = session();\n                // Arcano: ao abrir projeto, confere se os arquivos estão aqui (aviso de ausentes)\n                session.check_footage_on_open = true;\n                session.load_settings();\n")
+    # A janela de ausentes
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-ausentes.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_ausentes.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod arcano_carregando;\n", "pub mod arcano_ausentes;\npub mod arcano_carregando;\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs", "        crate::arcano_carregando::quadro(self, &ctx);\n",
+          "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_ausentes::quadro(self, &ctx);\n")
 
 
 def projeto_after(r):
