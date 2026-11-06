@@ -351,10 +351,20 @@ function spawn(base) {
 /// changes with every write of the file); `onMessage(type, json,
 /// path, bytes)` receives "reply" (json), "file" (path, bytes: a rendered file to download),
 /// "store" (path, bytes: a file to keep in browser storage) and "error" (json = message).
-export function workerRun(id, json, files, base, onMessage) {
+export function workerRun(id, json, files, base, onMessage, tentativa = 0) {
   let w;
+  // Arcano: worker que caiu → de novo num worker novo (memória limpa); na 3ª vez, sem GPU
+  const deNovo = (motivo) => {
+    if (tentativa >= 2 || !running.has(id)) { return false; }
+    running.delete(id);
+    console.warn("[Arcano] o trabalho caiu no worker (" + motivo + "): tentando de novo (" + (tentativa + 2) + "/3)");
+    const gpuAntes = jobWorkerGpu;
+    if (tentativa >= 1) { jobWorkerGpu = false; }
+    try { workerRun(id, json, files, base, onMessage, tentativa + 1); } finally { jobWorkerGpu = gpuAntes; }
+    return true;
+  };
   try {
-    w = idle.pop() ?? spawn(base);
+    w = (tentativa > 0 ? null : idle.pop()) ?? spawn(base);
   } catch (e) {
     // `new Worker` throws at once when the page's origin is opaque (a sandboxed iframe): the job
     // fails like one whose worker didn't start.
@@ -381,9 +391,10 @@ export function workerRun(id, json, files, base, onMessage) {
       }
     };
     w.worker.onerror = (e) => {
+      w.worker.terminate();
+      if (deNovo(String(e.message || "worker error"))) { return; }
       running.delete(id);
       onMessage("error", String(e.message || "worker error"), null, null);
-      w.worker.terminate();
     };
     for (const [path, bytes, version] of files) {
       const tag = version ?? bytes.length;
@@ -394,8 +405,9 @@ export function workerRun(id, json, files, base, onMessage) {
     w.worker.postMessage({ type: "job", json });
   }, (e) => {
     // The worker didn't start (#216): the job fails and the worker goes.
-    running.delete(id);
     w.worker.terminate();
+    if (deNovo(String(e.message || e))) { return; }
+    running.delete(id);
     onMessage("error", String(e.message || e), null, null);
   });
 }
