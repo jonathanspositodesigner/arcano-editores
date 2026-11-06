@@ -74,7 +74,7 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
     let fontes: Vec<&Ausente> = lista.iter().filter(|a| a.tipo == "fonte").collect();
     let mut fechar = false;
     let mut procurar = false;
-    egui::Modal::new(egui::Id::new("arcano_ausentes"))
+    egui::Modal::new(egui::Id::unique("arcano_ausentes"))
         .backdrop_color(egui::Color32::from_black_alpha(120))
         .frame(egui::Frame::window(&ctx.style_of(ctx.theme())).fill(t.panel_bg).inner_margin(egui::Margin::same(18)))
         .show(ctx, |ui| {
