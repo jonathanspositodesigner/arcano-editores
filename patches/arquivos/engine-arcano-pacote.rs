@@ -1067,11 +1067,20 @@ fn destino_da_midia<R: Read + Seek + ?Sized>(s: &Session, r: &mut R, id: &str, e
     {
         let _ = (m, origem);
         let dest = format!("/Projetos/{id}/{nome}");
-        if s.services.exists(&dest) {
-            return Ok((dest, true));
+        // 06/11/2026: além da tabela de arquivos, o leitor de mídia (pool) tem que receber os bytes,
+        // como num arquivo importado; senão ele procurava no disco ("operation not supported on this
+        // platform") e o projeto do navegador abria sem as imagens/vídeos.
+        let b = match s.services.read_file(&dest) {
+            Ok(b) if b.len() as u64 == e.tamanho => b,
+            _ => {
+                let b = ler_entrada(r, e)?;
+                s.services.store_file(&dest, &b)?;
+                b
+            }
+        };
+        if let Some(imp) = &s.importer {
+            imp.register(&dest, &b);
         }
-        let b = ler_entrada(r, e)?;
-        s.services.store_file(&dest, &b)?;
         Ok((dest, true))
     }
 }
