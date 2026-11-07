@@ -199,7 +199,11 @@ impl Painel {
         // Também qualquer janela, menu ou caixa do editor que passe por cima do espaço do painel
         // (Nova composição, Configurações, efeitos...): o painel sai da frente enquanto ela existir.
         let aviso = ctx.memory(|m| m.top_modal_layer().is_some());
-        let coberto = lugar.is_some_and(|r| {
+        // SEM LOGIN o painel nunca sai da frente por estar "coberto": a própria trava (tela escura
+        // por cima de tudo) cobre o espaço do painel e escondia ele, aí não dava pra entrar
+        // (cliente travado na tela de login, 07/11/2026). A trava já bloqueia o resto do editor.
+        let logado = self.logado();
+        let coberto = logado && lugar.is_some_and(|r| {
             let meus = [egui::Id::unique("arcano_painel_estado_video"), egui::Id::unique("arcano_painel_estado_imagem")];
             ctx.memory(|m| {
                 m.areas().visible_layer_ids().into_iter().any(|l| {
