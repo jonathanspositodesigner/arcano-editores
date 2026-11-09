@@ -415,3 +415,39 @@ fn janela_de_falha(app: &mut EffectcraftApp, ctx: &egui::Context, nome: &str, mo
         CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner).falha = None;
     }
 }
+
+// ---------------------------------------------------------------- prévia parada durante o render
+
+/// Render rodando agora (a prévia não pede quadro enquanto isso).
+static RENDER_RODANDO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Se a prévia está parada porque tem render rodando.
+pub fn previa_parada() -> bool {
+    RENDER_RODANDO.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Dono, 09/11/2026 ("pra que prévia enquanto renderiza?"): o registro do PC dele mostrou a prévia
+/// montando quadros AO MESMO TEMPO que o render, os dois disputando a memória da placa (6 GB),
+/// "Out of Memory" 16 s depois de começar e a placa caindo no meio. Agora, a cada passada da
+/// janela: começou um render → para o play, larga os quadros da prévia na fila e solta a memória
+/// de camadas que a prévia guarda na placa (fica no mínimo); acabou → a prévia volta com a
+/// memória de sempre. Enquanto isso o visor mostra o último quadro que já tinha.
+pub fn previa_durante_render(app: &mut EffectcraftApp) {
+    let agora = app.session.is_rendering();
+    let antes = RENDER_RODANDO.swap(agora, std::sync::atomic::Ordering::Relaxed);
+    if agora && !antes {
+        app.stop();
+        app.frames.arcano_largar_fila();
+        if let Some(g) = &app.gpu {
+            g.context().set_upload_budget(64 << 20);
+            g.context().clear_uploads();
+        }
+        app.ui.status = "Renderizando: a prévia volta quando o render terminar.".into();
+        log::info!("[render] prévia parada enquanto renderiza (memória da placa liberada pro render)");
+    } else if !agora && antes {
+        if let Some(g) = &app.gpu {
+            crate::arcano_gpu::ajustar(g);
+        }
+        log::info!("[render] render acabou: prévia de volta");
+    }
+}

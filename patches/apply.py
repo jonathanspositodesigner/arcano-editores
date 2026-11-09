@@ -610,6 +610,28 @@ def programa_leve(r):
           "        let res = self.viewer_res();\n        let full = res.scale(zoom, ppp);\n"
           "        // Arcano: prévia leve: comp aparecendo menor que o tamanho real → no máximo ½ (zoom 100% ou mais: cheia)\n"
           "        let full = if res.is_auto() && self.session.prefs.previews.arcano_previa_leve && f64::from(zoom * ppp) < 0.999 { full.min(0.5) } else { full };\n")
+    # prévia parada durante o render (dono, 09/11/2026: Out of Memory com prévia e render juntos)
+    troca(r, "crates/ui-egui/src/frames.rs", "    pub fn clear(&self) {\n        if let Some(r) = &self.remote {\n",
+          "    /// Arcano: começou um render: larga os quadros da prévia na fila (os que já estão montando terminam;\n"
+          "    /// o do visor é cancelado).\n"
+          "    pub fn arcano_largar_fila(&self) {\n"
+          "        let Ok(mut q) = self.queue.lock() else { return };\n"
+          "        let Ok(mut inf) = self.inflight.lock() else { return };\n"
+          "        q.jobs.clear();\n"
+          "        let rodando = q.running.clone();\n"
+          "        inf.retain(|k| rodando.contains(k));\n"
+          "        for (_, c) in &q.urgent_cancels {\n"
+          "            c.store(true, Ordering::Relaxed);\n"
+          "        }\n"
+          "    }\n\n"
+          "    pub fn clear(&self) {\n        if let Some(r) = &self.remote {\n")
+    troca(r, "crates/ui-egui/src/app/viewer_frames.rs",
+          "        let Some(c) = self.session.project.comp(comp) else { return };\n        let key = self.frame_key(comp, frame, scale);\n",
+          "        // Arcano: render rodando → a prévia não pede quadro (a placa fica pro render)\n"
+          "        if crate::arcano_render::previa_parada() {\n            return;\n        }\n"
+          "        let Some(c) = self.session.project.comp(comp) else { return };\n        let key = self.frame_key(comp, frame, scale);\n")
+    troca(r, "crates/ui-egui/src/app/frame.rs", "        self.apply_gpu_failure(ctx);\n",
+          "        self.apply_gpu_failure(ctx);\n        crate::arcano_render::previa_durante_render(self);\n")
     # prévias rápidas: resolução adaptável enquanto arrasta
     troca(r, "crates/engine/src/cmd/viewer_cmds.rs", "            fast_previews: FastPreviews::default(),\n",
           "            fast_previews: FastPreviews::AdaptiveResolution,\n")
