@@ -385,6 +385,8 @@ export function workerRun(id, json, files, base, onMessage, tentativa = 0) {
         onMessage("file", null, m.path, new Uint8Array(m.bytes));
       } else if (m.type === "store") {
         onMessage("store", null, m.path, new Uint8Array(m.bytes));
+      } else if (m.type === "panico") {
+        w.panico = String(m.texto || "");
       } else if (m.type === "stats") {
         jobStats.push({ kind: m.kind, gpu: m.gpu, passes: m.passes, readbacks: m.readbacks, ms: m.ms });
         if (jobStats.length > 16) jobStats.shift();
@@ -392,9 +394,10 @@ export function workerRun(id, json, files, base, onMessage, tentativa = 0) {
     };
     w.worker.onerror = (e) => {
       w.worker.terminate();
-      if (deNovo(String(e.message || "worker error"))) { return; }
+      const motivo = w.panico ? ("erro interno: " + w.panico) : String(e.message || "worker error");
+      if (deNovo(motivo)) { return; }
       running.delete(id);
-      onMessage("error", String(e.message || "worker error"), null, null);
+      onMessage("error", motivo, null, null);
     };
     for (const [path, bytes, version] of files) {
       const tag = version ?? bytes.length;
