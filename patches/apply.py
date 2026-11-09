@@ -327,6 +327,7 @@ pub(crate) const GATE: &str =""")
     registro_completo(r)
     render_rapido(r)
     previa_guardada(r)
+    som_volta_logo(r)
     destino_navegador(r)
     worker_que_tenta_de_novo(r)
     worker_com_memoria_de_navegador(r)
@@ -687,6 +688,21 @@ def programa_leve_pc(r):
           "    arcano_placa::ligar();\n")
     troca(r, "crates/engine/src/menus.rs", "  Prévia leve (mais rápida) | arcano.previaLeve\n",
           "  Prévia leve (mais rápida) | arcano.previaLeve\n  Usar a placa de vídeo (abrir e gravar vídeo) | arcano.placaVideo\n")
+
+
+def som_volta_logo(r):
+    """Prévia (dono, 09/11/2026: "cadê o áudio no preview"): a prévia continua esperando o quadro (sem pular,
+    pedido de 05/11), mas o som volta assim que o próximo meio segundo de quadros está pronto. Antes, depois de
+    um quadro atrasado, o som só voltava com o trecho inteiro no cache (projeto pesado = prévia muda o tempo
+    todo). Agora o som pausa enquanto o quadro monta e volta logo (picotado em projeto pesado, nunca mudo)."""
+    troca(r, "crates/ui-egui/src/app/prefetch.rs",
+          "        if (self.playback.keeps_up(now) && self.cached_ahead(&p, &series, cur, ahead.min(fit))) || self.cached_ahead(&p, &series, cur, fit) {\n",
+          "        // Arcano: meio segundo de quadros prontos à frente já basta pro som voltar\n"
+          "        let volta = ((fr.as_f64() * 0.5).ceil() as i64).max(3).min(fit.max(1));\n"
+          "        if (self.playback.keeps_up(now) && self.cached_ahead(&p, &series, cur, ahead.min(fit)))\n"
+          "            || self.cached_ahead(&p, &series, cur, volta)\n"
+          "            || self.cached_ahead(&p, &series, cur, fit)\n"
+          "        {\n")
 
 
 def tempo_real(r):
