@@ -335,6 +335,7 @@ pub(crate) const GATE: &str =""")
     ladrilho_navegador(r)
     tempo_real(r)
     render_simples(r)
+    programa_leve(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
     # vídeo da RTX 3050, o render caía para o processador no meio e ficava lento. O render volta a usar a
     # GPU da janela (como no original); a memória fixa menor (memoria_video) é o que evita o Out of Memory.
@@ -515,6 +516,154 @@ def render_simples(r):
           "                crate::arcano_render::qualidade(app, ui, &lp, r, cx_num - 6.0, ix + 70.0, it, rendering, &mut actions);\n"
           "                continue;\n"
           "            }\n")
+
+
+def programa_leve(r):
+    """Programa mais leve (dono, 09/11/2026: "o CapCut renderiza em minutos; aqui é pesado; quase
+    todo mundo faz 1080p pra rede social"). Comum ao navegador e ao PC:
+    (1) Fila de render: 1080p/720p/480p RENDERIZAM menor (Render Settings ▸ Resolution), em vez de
+        montar a comp inteira e só diminuir no fim; item novo de comp maior que 1080p já vem em
+        1080p (arquivos/ui-arcano-render.rs).
+    (2) H.264 do render pode ir pela placa de vídeo (encoder registrado pelo programa de PC,
+        arquivos/export-arcano-placa.rs; sem registro = encoder de sempre).
+    (3) Opção "Usar a placa de vídeo" (preferência previews.arcanoPlacaVideo, ligada) em
+        arquivos/render-arcano-placa.rs, que a interface aplica ao carregar as preferências.
+    (4) Prévia leve (previews.arcanoPreviaLeve, ligada; Editar ▸ Prévia leve): com Resolution Auto e
+        o visor mostrando a comp menor que o tamanho real (zoom × densidade < 1), a prévia monta no
+        máximo ½ (a comp 1080×1920 vista inteira na tela), parado ou tocando (o cache serve aos dois).
+        Zoom 100% ou mais continua cheia.
+    (5) Prévias rápidas ▸ Resolução adaptável por padrão: enquanto arrasta/mexe, ¼ (parado volta)."""
+    pasta = pathlib.Path(__file__).parent / "arquivos"
+    copia(pasta / "render-arcano-placa.rs", pathlib.Path(r) / "crates/render/src/arcano_placa.rs")
+    troca(r, "crates/render/src/lib.rs", "pub mod audio;\n", "pub mod arcano_placa;\npub mod audio;\n")
+    copia(pasta / "export-arcano-placa.rs", pathlib.Path(r) / "crates/export/src/arcano_placa.rs")
+    troca(r, "crates/export/src/lib.rs", "mod encode;\n", "pub mod arcano_placa;\nmod encode;\n")
+    enc = "crates/export/src/encode.rs"
+    troca(r, enc, "pub(crate) use effectcraft_raster::yuv::rgba_to_yuv420;\n",
+          "pub(crate) use effectcraft_raster::yuv::rgba_to_yuv420;\n\n"
+          "// ---------------------------------------------------------------- Arcano: H.264 pela placa de vídeo\n\n"
+          "/// O encoder H.264 da placa (registrado pelo programa de PC) no lugar do do processador.\n"
+          "struct H264NaPlaca {\n"
+          "    enc: Box<dyn crate::arcano_placa::H264Placa>,\n"
+          "    w: u32,\n"
+          "    h: u32,\n"
+          "    y: Vec<u8>,\n"
+          "    u: Vec<u8>,\n"
+          "    v: Vec<u8>,\n"
+          "}\n\n"
+          "fn pacotes_placa(r: std::result::Result<Vec<crate::arcano_placa::Pacote>, String>) -> Result<Vec<Packet>> {\n"
+          "    match r {\n"
+          "        Ok(ps) => Ok(ps.into_iter().map(|p| Packet { data: p.dados, key: p.chave, cto: p.cto }).collect()),\n"
+          "        Err(e) => {\n"
+          "            crate::arcano_placa::marcar_falha(&e);\n"
+          "            Err(enc(format!(\"a placa de vídeo falhou ao gravar ({e}). Renderize de novo: o próximo vai pelo processador.\")))\n"
+          "        }\n"
+          "    }\n"
+          "}\n\n"
+          "impl VideoEncoder for H264NaPlaca {\n"
+          "    fn sample_entry(&self) -> SampleEntry {\n"
+          "        let mut entry = self.enc.sample_entry();\n"
+          "        tag_bt709_limited(&mut entry);\n"
+          "        entry\n"
+          "    }\n"
+          "    fn encode(&mut self, rgba: &[u8], index: u64) -> Result<Vec<Packet>> {\n"
+          "        let (mut y, mut u, mut v) = (std::mem::take(&mut self.y), std::mem::take(&mut self.u), std::mem::take(&mut self.v));\n"
+          "        rgba_to_yuv420(rgba, self.w as usize, self.h as usize, &mut y, &mut u, &mut v);\n"
+          "        let planes = Yuv420::Planes { y, u, v };\n"
+          "        let r = self.encode_yuv420(&planes, index);\n"
+          "        if let Yuv420::Planes { y, u, v } = planes {\n"
+          "            (self.y, self.u, self.v) = (y, u, v);\n"
+          "        }\n"
+          "        r\n"
+          "    }\n"
+          "    fn takes_yuv420(&self) -> bool {\n"
+          "        true\n"
+          "    }\n"
+          "    fn encode_yuv420(&mut self, p: &Yuv420, index: u64) -> Result<Vec<Packet>> {\n"
+          "        let (y, u, v) = p.slices(self.w as usize, self.h as usize);\n"
+          "        pacotes_placa(self.enc.codificar(y, u, v, index))\n"
+          "    }\n"
+          "    fn flush(&mut self) -> Result<Vec<Packet>> {\n"
+          "        pacotes_placa(self.enc.terminar())\n"
+          "    }\n"
+          "    fn media_start(&self) -> Option<i64> {\n"
+          "        self.enc.inicio()\n"
+          "    }\n"
+          "}\n")
+    troca(r, enc, "        OutputFormat::H264 => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n",
+          "        OutputFormat::H264 => match crate::arcano_placa::abrir(w, h, rate.num, rate.den, job.output.bitrate_kbps) {\n"
+          "            Some(e) => Box::new(H264NaPlaca { enc: e, w, h, y: vec![], u: vec![], v: vec![] }),\n"
+          "            None => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n"
+          "        },\n")
+    # preferências (ligadas por padrão)
+    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    fast_previews: bool = false,\n",
+          "    fast_previews: bool = false,\n"
+          "    /// Arcano: usar a placa de vídeo para abrir e gravar vídeo (programa de PC).\n"
+          "    arcano_placa_video: bool = true,\n"
+          "    /// Arcano: prévia leve (no Auto, até ½ quando a comp aparece menor que o tamanho real).\n"
+          "    arcano_previa_leve: bool = true,\n")
+    troca(r, "crates/ui-egui/src/app/prefs.rs", "        self.ui.viewer.fast_preview = p.previews.fast_previews;\n",
+          "        self.ui.viewer.fast_preview = p.previews.fast_previews;\n"
+          "        effectcraft_render::arcano_placa::definir(p.previews.arcano_placa_video);\n")
+    # prévia leve
+    troca(r, "crates/ui-egui/src/app/viewer_frames.rs", "        let res = self.viewer_res();\n        let full = res.scale(zoom, ppp);\n",
+          "        let res = self.viewer_res();\n        let full = res.scale(zoom, ppp);\n"
+          "        // Arcano: prévia leve: comp aparecendo menor que o tamanho real → no máximo ½ (zoom 100% ou mais: cheia)\n"
+          "        let full = if res.is_auto() && self.session.prefs.previews.arcano_previa_leve && f64::from(zoom * ppp) < 0.999 { full.min(0.5) } else { full };\n")
+    # prévias rápidas: resolução adaptável enquanto arrasta
+    troca(r, "crates/engine/src/cmd/viewer_cmds.rs", "            fast_previews: FastPreviews::default(),\n",
+          "            fast_previews: FastPreviews::AdaptiveResolution,\n")
+    # menu Editar: Prévia leve (e, no PC, Usar a placa de vídeo) com marca de ligado
+    troca(r, "crates/engine/src/menus.rs", '    Snapshot | edit.purge {"what":"snapshot"} | Cmd+Shift+F5\n',
+          '    Snapshot | edit.purge {"what":"snapshot"} | Cmd+Shift+F5\n  Prévia leve (mais rápida) | arcano.previaLeve\n')
+    ent = "crates/ui-egui/src/menus/entries.rs"
+    troca(r, ent, '        "playback.cacheWhenIdle" => Some(app.ui.cache_when_idle),\n',
+          '        "playback.cacheWhenIdle" => Some(app.ui.cache_when_idle),\n'
+          '        "arcano.previaLeve" => Some(app.session.prefs.previews.arcano_previa_leve),\n'
+          '        "arcano.placaVideo" => Some(app.session.prefs.previews.arcano_placa_video),\n')
+    troca(r, ent, '    if e.command == "arcano.salvarAep" {\n        return true;\n    }\n',
+          '    if e.command == "arcano.salvarAep" || e.command == "arcano.previaLeve" || e.command == "arcano.placaVideo" {\n        return true;\n    }\n')
+    troca(r, "crates/ui-egui/src/menus/invoke.rs", '    if id == "arcano.salvarAep" {\n',
+          '    if id == "arcano.previaLeve" || id == "arcano.placaVideo" {\n'
+          '        let (chave, agora) = if id == "arcano.previaLeve" {\n'
+          '            ("previews.arcanoPreviaLeve", app.session.prefs.previews.arcano_previa_leve)\n'
+          '        } else {\n'
+          '            ("previews.arcanoPlacaVideo", app.session.prefs.previews.arcano_placa_video)\n'
+          '        };\n'
+          '        app.set_pref(chave, serde_json::json!(!agora))?;\n'
+          '        if id == "arcano.placaVideo" {\n'
+          '            effectcraft_render::arcano_placa::definir(!agora);\n'
+          '        }\n'
+          '        ctx.request_repaint();\n'
+          '        return Ok(Value::Null);\n'
+          '    }\n'
+          '    if id == "arcano.salvarAep" {\n')
+
+
+def programa_leve_pc(r):
+    """Programa mais leve, parte do PC (dono, 09/11/2026): placa de vídeo para ABRIR vídeo
+    (decodificadores do sistema pelo filmcraft-platform, como o PR #819 do EffectCraft) e para
+    GRAVAR o H.264 do render (NVENC, só NVIDIA no Windows). arquivos/app-arcano-placa.rs.
+    Editar ▸ "Usar a placa de vídeo (abrir e gravar vídeo)" desliga."""
+    copia(pathlib.Path(__file__).parent / "arquivos/app-arcano-placa.rs", pathlib.Path(r) / "apps/effectcraft/src/arcano_placa.rs")
+    rev = "09aaf9bf15d510eda1c413c0ccabb1d7e08b41c5"
+    raiz = (pathlib.Path(r) / "Cargo.toml").read_text(encoding="utf-8")
+    if f'filmcraft-codecs = {{ git = "https://github.com/storytold/filmcraft", rev = "{rev}" }}' not in raiz:
+        sys.exit("ERRO: a revisão do FilmCraft do editor mudou: confira o filmcraft-platform (programa_leve_pc)")
+    troca(r, "apps/effectcraft/Cargo.toml", "[dependencies]\n",
+          "[dependencies]\n"
+          "effectcraft-export = { workspace = true }\n"
+          "effectcraft-render = { workspace = true }\n"
+          "filmcraft-codecs = { workspace = true }\n"
+          "filmcraft-isobmff = { workspace = true }\n"
+          f'filmcraft-platform = {{ git = "https://github.com/storytold/filmcraft", rev = "{rev}" }}\n')
+    troca(r, "apps/effectcraft/src/main.rs", "mod control_server;\n", "mod arcano_placa;\nmod control_server;\n")
+    troca(r, "apps/effectcraft/src/main.rs", "    effectcraft_engine::text::fonts::scan_system_in_background();\n",
+          "    effectcraft_engine::text::fonts::scan_system_in_background();\n"
+          "    // Arcano: placa de vídeo para abrir e gravar vídeo (Editar ▸ Usar a placa de vídeo)\n"
+          "    arcano_placa::ligar();\n")
+    troca(r, "crates/engine/src/menus.rs", "  Prévia leve (mais rápida) | arcano.previaLeve\n",
+          "  Prévia leve (mais rápida) | arcano.previaLeve\n  Usar a placa de vídeo (abrir e gravar vídeo) | arcano.placaVideo\n")
 
 
 def tempo_real(r):
@@ -2079,6 +2228,7 @@ def desktop(app, raiz):
         procurar_atualizacao(raiz, "effectcraft")
         guarda_travamento(raiz)
         placa_caiu(raiz)
+        programa_leve_pc(raiz)
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
         troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
         troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')

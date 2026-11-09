@@ -1,6 +1,12 @@
 //! Arcano: a Fila de render mais direta (pedido do dono): cada item já aparece aberto, com uma
-//! linha "Qualidade" (Original da composição, 1080p, 720p, 480p; padrão Original) e o botão
-//! "Escolher onde salvar" (no navegador o vídeo vai para os Downloads).
+//! linha "Qualidade" (Original da composição, 1080p, 720p, 480p) e o botão "Escolher onde salvar"
+//! (no navegador o vídeo vai para os Downloads).
+//!
+//! 09/11/2026 (programa mais leve): 1080p/720p/480p agora RENDERIZAM menor (Render Settings ▸
+//! Resolution = lado menor / n, como a prévia em ½), em vez de renderizar a composição inteira e só
+//! diminuir no fim (o Resize do módulo de saída fazia isso: uma comp 2000×3556 em "1080p" montava
+//! 2000×3556 por quadro). O Resize fica só para acertar o tamanho exato (par). Item novo de comp
+//! maior que 1080p já vem em 1080p (o público é rede social).
 
 use std::collections::HashSet;
 use std::sync::Mutex;
@@ -28,6 +34,34 @@ pub fn abrir_novos(open: &mut Vec<u64>, queue: &[RenderQueueItem]) {
 
 const ALTURAS: [(&str, u32); 3] = [("1080p", 1080), ("720p", 720), ("480p", 480)];
 
+/// Itens que já receberam (ou não precisavam) o padrão 1080p nesta sessão.
+static PADRAO: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
+
+/// Render Settings ▸ Resolution para o lado menor `n` (nunca acima de 1: menor que isso a comp não
+/// tem pixel a mais para dar, o Resize amplia como antes).
+fn escala_para(w: u32, h: u32, n: u32) -> f64 {
+    (n as f64 / w.min(h).max(1) as f64).min(1.0)
+}
+
+/// As ações que levam o item `it` à opção escolhida (`None` = Original). Só manda o que muda: o
+/// comando recusa um pedido que não muda nada ("nothing to change", conferido no CLI).
+fn acoes_qualidade(it: &RenderQueueItem, alvo: Option<((u32, u32), f64)>, actions: &mut Vec<(&'static str, Value)>) {
+    let id = it.id;
+    let k = alvo.map_or(1.0, |(_, k)| k);
+    if (it.settings.resolution - k).abs() > 1e-6 {
+        actions.push(("renderQueue.setRenderSettings", json!({"item": id, "resolution": k})));
+    }
+    let o = &it.output.resize;
+    match alvo {
+        None if o.enabled => actions.push(("renderQueue.setOutputModule", json!({"item": id, "resize": false}))),
+        None => {}
+        Some(((a, b), _)) if o.enabled && (o.width, o.height) == (a, b) && !o.lock_aspect => {}
+        Some(((a, b), _)) => {
+            actions.push(("renderQueue.setOutputModule", json!({"item": id, "resize": {"enabled": true, "width": a, "height": b, "lockAspect": false, "quality": "high"}})));
+        }
+    }
+}
+
 fn par(n: f64) -> u32 {
     ((n / 2.0).round() as u32 * 2).max(2)
 }
@@ -45,18 +79,34 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
     let t = app.tokens;
     lp.text(pos2(x_rotulo, r.center().y), Align2::LEFT_CENTER, "Qualidade:", Tokens::ui(11.5), t.text_dim);
     let Some(c) = app.session.project.comp(it.comp) else { return };
-    let (w, h) = it.settings.output_size(c);
+    // tamanho da composição (sem a Resolution do render, que agora muda com a escolha)
+    let (w, h) = (c.width.max(1), c.height.max(1));
     let mut nomes = vec![format!("Original da composição ({w}×{h})")];
-    let mut tamanhos = vec![None];
+    let mut tamanhos: Vec<Option<((u32, u32), f64)>> = vec![None];
     for (nome, n) in ALTURAS {
         let (a, b) = tamanho(w, h, n);
         nomes.push(format!("{nome} ({a}×{b})"));
-        tamanhos.push(Some((a, b)));
+        tamanhos.push(Some(((a, b), escala_para(w, h, n))));
     }
     let o = &it.output.resize;
-    let atual = if !o.enabled { Some(0) } else { tamanhos.iter().position(|s| *s == Some((o.width, o.height))) };
+    let cheia = (it.settings.resolution - 1.0).abs() < 1e-6;
+    let atual = if !o.enabled && cheia { Some(0) } else if !o.enabled { None } else { tamanhos.iter().position(|s| s.is_some_and(|(t, _)| t == (o.width, o.height))) };
+    // item novo de comp maior que 1080p: já vem em 1080p (uma vez por item; quem trocar fica com a troca)
+    {
+        let mut g = PADRAO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if g.get_or_insert_with(HashSet::new).insert(it.id)
+            && !rendering
+            && it.status == RenderStatus::Queued
+            && it.last_output.is_none()
+            && atual == Some(0)
+            && w.min(h) > 1080
+        {
+            acoes_qualidade(it, tamanhos[1], actions);
+        }
+    }
     let texto = match atual {
         Some(i) => nomes[i].clone(),
+        None if !o.enabled => format!("Personalizado ({}×{})", (w as f64 * it.settings.resolution).round(), (h as f64 * it.settings.resolution).round()),
         None => format!("Personalizado ({}×{})", o.width, o.height),
     };
     let dd = Rect::from_min_size(pos2(x, r.min.y + 3.0), vec2(220.0, r.height() - 6.0));
@@ -67,11 +117,7 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
     }
     app.auto.add(&format!("renderQueue.item.{}.qualidade", it.id), dd, &texto);
     if let Some(i) = widgets::popup_menu(ui, id, dd.left_bottom(), &nomes, atual) {
-        let resize = match tamanhos[i] {
-            None => json!(false),
-            Some((a, b)) => json!({"enabled": true, "width": a, "height": b, "lockAspect": false, "quality": "high"}),
-        };
-        actions.push(("renderQueue.setOutputModule", json!({"item": it.id, "resize": resize})));
+        acoes_qualidade(it, tamanhos[i], actions);
     }
     // onde salvar
     let bt = Rect::from_min_size(pos2(dd.max.x + 12.0, r.min.y + 3.0), vec2(170.0, r.height() - 6.0));
