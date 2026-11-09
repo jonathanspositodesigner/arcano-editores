@@ -2076,6 +2076,15 @@ def guarda_travamento(r):
           '                log::info!("effectcraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display());\n'
           '                arcano_guarda::ligar(effectcraft_engine::logging::log_dir(Some(&dir)));\n'
           '            }\n')
+    # um programa aberto só (aberto sem arquivo e já tem um igual: traz o outro pra frente e fecha), ANTES do
+    # registro (a 2ª cópia não gira os registros da 1ª)
+    troca(r, "apps/effectcraft/src/main.rs",
+          "    // The session log lives in the settings folder (`Logs/effectcraft.log`, the previous two runs\n",
+          "    // Arcano: já aberto e esta cópia veio sem arquivo (atalho clicado duas vezes): fica a de antes\n"
+          "    if files.is_empty() && control_port.is_none() && !demo && !arcano_guarda::um_so_aberto() {\n"
+          "        return Ok(());\n"
+          "    }\n"
+          "    // The session log lives in the settings folder (`Logs/effectcraft.log`, the previous two runs\n")
     troca(r, "crates/engine/src/system/logging.rs", "pub const KEEP: usize = 2;\n", "pub const KEEP: usize = 8;\n")
     troca(r, "crates/engine/src/settings/prefs/sections.rs", "    interval_minutes: u32 = 20,\n", "    interval_minutes: u32 = 10,\n")
     troca(r, "crates/engine/src/settings/session_settings.rs",

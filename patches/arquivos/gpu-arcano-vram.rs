@@ -46,7 +46,7 @@ pub fn memoria_dedicada(nome: &str) -> Option<u64> {
 }
 
 /// Orçamento do cache de camadas da GPU pela memória da placa: um terço dela, entre 512 MB e
-/// 2 GB. Sem saber a memória: 768 MB no PC (metade do padrão original de 1,5 GB) e 384 MB no
+/// 2 GB (placa com menos de 1 GB: 256 MB). Sem saber a memória: 768 MB no PC (metade do padrão original de 1,5 GB) e 384 MB no
 /// navegador.
 pub fn orcamento_base(nome_da_placa: &str) -> usize {
     if cfg!(target_arch = "wasm32") {
@@ -55,6 +55,9 @@ pub fn orcamento_base(nome_da_placa: &str) -> usize {
     // o compositor chama a placa de "NVIDIA GeForce RTX 3050 (Vulkan)": só o nome
     let nome = nome_da_placa.rsplit_once(" (").map_or(nome_da_placa, |(a, _)| a);
     match memoria_dedicada(nome) {
+        // placa integrada ou com menos de 1 GB próprio (registro de 09/11/2026: AMD Radeon com 495 MB):
+        // o piso de 512 MB passava da memória da placa; 256 MB
+        Some(m) if m < (1 << 30) => 256 << 20,
         Some(m) => ((m / 3) as usize).clamp(512 << 20, 2048 << 20),
         None => 768 << 20,
     }

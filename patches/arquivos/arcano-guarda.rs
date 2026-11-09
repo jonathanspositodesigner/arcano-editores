@@ -252,3 +252,88 @@ fn vigia(_pasta: PathBuf) {
         }
     }
 }
+
+// ---------------------------------------------------------------- um programa aberto só
+
+/// Registro de 09/11/2026 (PC da Herica): o programa abriu DUAS vezes com 0,1 s de diferença (duas
+/// vezes no dia), as duas cópias disputando a memória (7,8 GB usados, ~1 GB livre) e a placa
+/// integrada. Agora, aberto sem arquivo (atalho, menu Iniciar), se já tem um igual aberto: traz a
+/// janela dele pra frente e esta cópia fecha. Com arquivo (duplo clique num projeto) abre normal,
+/// como antes. Espera até 3 s o outro largar (o programa fechando pra atualizar).
+/// `true` = pode seguir abrindo.
+#[cfg(windows)]
+pub fn um_so_aberto() -> bool {
+    use windows::Win32::Foundation::{WAIT_ABANDONED, WAIT_OBJECT_0};
+    use windows::Win32::System::Threading::{CreateMutexW, WaitForSingleObject};
+    use windows::core::PCWSTR;
+    let exe = std::env::current_exe().ok();
+    let nome = exe
+        .as_ref()
+        .and_then(|e| e.file_stem())
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|| "arcano".into())
+        .replace(['\\', '/'], "_");
+    let w: Vec<u16> = format!("Local\\ArcanoLayers-{nome}").encode_utf16().chain(Some(0)).collect();
+    // SAFETY: nome terminado em zero; a alça fica aberta enquanto o programa vive (de propósito).
+    let Ok(m) = (unsafe { CreateMutexW(None, false, PCWSTR(w.as_ptr())) }) else { return true };
+    let r = unsafe { WaitForSingleObject(m, 3000) };
+    if r == WAIT_OBJECT_0 || r == WAIT_ABANDONED {
+        return true;
+    }
+    log::warn!("[abrir] o programa já está aberto: trazendo a janela dele pra frente e fechando esta cópia");
+    if let Some(e) = exe {
+        trazer_pra_frente(&e);
+    }
+    false
+}
+
+#[cfg(not(windows))]
+pub fn um_so_aberto() -> bool {
+    true
+}
+
+#[cfg(windows)]
+fn trazer_pra_frente(exe: &std::path::Path) {
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow};
+    use windows::core::{BOOL, PWSTR};
+    struct Busca {
+        exe: String,
+        eu: u32,
+        achou: Option<HWND>,
+    }
+    unsafe extern "system" fn cada(h: HWND, l: LPARAM) -> BOOL {
+        // SAFETY: `l` é o ponteiro da Busca abaixo, viva durante o EnumWindows.
+        let b = unsafe { &mut *(l.0 as *mut Busca) };
+        if !unsafe { IsWindowVisible(h) }.as_bool() {
+            return BOOL(1);
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+        if pid == 0 || pid == b.eu {
+            return BOOL(1);
+        }
+        let Ok(p) = (unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }) else { return BOOL(1) };
+        let mut buf = [0u16; 1024];
+        let mut n = buf.len() as u32;
+        let ok = unsafe { QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut n) }.is_ok();
+        let _ = unsafe { CloseHandle(p) };
+        if ok && String::from_utf16_lossy(&buf[..n as usize]).to_lowercase() == b.exe {
+            b.achou = Some(h);
+            return BOOL(0);
+        }
+        BOOL(1)
+    }
+    let mut b = Busca { exe: exe.to_string_lossy().to_lowercase(), eu: std::process::id(), achou: None };
+    // SAFETY: callback com a assinatura que a API pede; `b` vive até o fim da chamada.
+    let _ = unsafe { EnumWindows(Some(cada), LPARAM(&mut b as *mut Busca as isize)) };
+    if let Some(h) = b.achou {
+        unsafe {
+            if IsIconic(h).as_bool() {
+                let _ = ShowWindow(h, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(h);
+        }
+    }
+}

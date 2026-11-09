@@ -442,6 +442,15 @@ pub fn previa_durante_render(app: &mut EffectcraftApp) {
             g.context().set_upload_budget(64 << 20);
             g.context().clear_uploads();
         }
+        // PC com pouca memória livre (registro de 09/11/2026: 7,8 GB usados, ~1 GB livre, travou 3
+        // vezes): solta também os quadros da prévia guardados na memória (até 3 GB) pro render.
+        // Com memória sobrando eles ficam (a prévia volta sem montar tudo de novo).
+        if let Some((livre, total, _)) = arcano_guarda::memoria()
+            && livre < 2048.max(total / 4)
+        {
+            app.frames.clear();
+            log::info!("[render] pouca memória livre ({livre} MB de {total} MB): quadros da prévia soltos pro render");
+        }
         app.ui.status = "Renderizando: a prévia volta quando o render terminar.".into();
         log::info!("[render] prévia parada enquanto renderiza (memória da placa liberada pro render)");
     } else if !agora && antes {
