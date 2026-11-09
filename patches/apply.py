@@ -1978,6 +1978,90 @@ def registro_completo(r):
         raise SystemExit("ERRO: registro_completo precisa do guarda_crate antes")
 
 
+def placa_caiu(r):
+    """Dono, 09/11/2026: "graphics device lost" no meio do render (2000×3556, 45 camadas, GPU 549 ms/quadro)
+    fecha o programa toda hora. O render usava a MESMA conexão com a placa que desenha a janela: caiu a
+    placa, caiu a janela. (1) O render ganha uma conexão própria com a placa (`Gpu::try_headless`, a mesma
+    do CLI), feita ao começar o render, com metade da memória de camadas da janela; se ela cair, o render
+    segue pelo processador (o job já faz isso) e a janela não é a conexão que caiu. Não deu para criar →
+    usa a da janela, como antes. (2) Se a conexão da janela cair mesmo assim, o aviso fica em português e
+    o programa ABRE DE NOVO sozinho quando fecha (oferece recuperar o projeto salvo na hora). Só PC."""
+    rq = "crates/engine/src/render_queue.rs"
+    troca(r, rq, "        accel: s.accel.clone(),\n        exporter,\n",
+          "        accel: arcano_accel_render(&s.accel),\n        exporter,\n")
+    troca(r, rq, "            accel: self.accel.clone(),\n            exporter,\n",
+          "            accel: arcano_accel_render(&self.accel),\n            exporter,\n")
+    caminho = pathlib.Path(r) / rq
+    t = caminho.read_text(encoding="utf-8")
+    t += (
+        "\n/// Arcano (09/11/2026): conexão com a placa só do render, separada da janela (o programa de PC põe\n"
+        "/// aqui ao começar o render). Caída ou ausente → a da janela, como antes.\n"
+        "pub static ARCANO_ACCEL_RENDER: std::sync::Mutex<Option<Arc<dyn effectcraft_render::Accelerator>>> = std::sync::Mutex::new(None);\n\n"
+        "fn arcano_accel_render(janela: &Option<Arc<dyn effectcraft_render::Accelerator>>) -> Option<Arc<dyn effectcraft_render::Accelerator>> {\n"
+        "    let propria = ARCANO_ACCEL_RENDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().filter(|a| a.available());\n"
+        "    if propria.is_some() && janela.is_some() {\n"
+        "        log::info!(\"[render] na conexão própria com a placa (separada da janela)\");\n"
+        "    }\n"
+        "    if janela.is_none() { janela.clone() } else { propria.or_else(|| janela.clone()) }\n"
+        "}\n")
+    caminho.write_text(t, encoding="utf-8")
+    # UI: cria a conexão do render antes de começar (só PC)
+    rr = "crates/ui-egui/src/arcano_render.rs"
+    troca(r, rr, "#[cfg(not(target_arch = \"wasm32\"))]\npub fn esperar_gpu(app: &mut EffectcraftApp, ctx: &egui::Context, params: &Value) -> bool {\n",
+          "#[cfg(not(target_arch = \"wasm32\"))]\npub fn esperar_gpu(app: &mut EffectcraftApp, ctx: &egui::Context, params: &Value) -> bool {\n"
+          "    let esperar = esperar_gpu_janela(app, ctx, params);\n"
+          "    if !esperar && app.session.project.settings.gpu_acceleration && app.session.accel.is_some() {\n"
+          "        gpu_do_render();\n"
+          "    }\n"
+          "    esperar\n"
+          "}\n\n"
+          "/// Conexão própria do render com a placa (uma por sessão; refeita se caiu).\n"
+          "#[cfg(not(target_arch = \"wasm32\"))]\n"
+          "fn gpu_do_render() {\n"
+          "    let mut g = effectcraft_engine::render_queue::ARCANO_ACCEL_RENDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+          "    if g.as_ref().is_some_and(|a| a.available()) {\n"
+          "        return;\n"
+          "    }\n"
+          "    let t = Instant::now();\n"
+          "    match effectcraft_gpu::Gpu::try_headless() {\n"
+          "        Ok(gpu) => {\n"
+          "            let placa = effectcraft_engine::render::Accelerator::name(&gpu);\n"
+          "            let bytes = crate::arcano_gpu::orcamento_de_camadas(&placa, 1);\n"
+          "            gpu.context().set_upload_budget(bytes);\n"
+          "            log::info!(\"[render] conexão própria com a placa: {placa} ({} MB de camadas, {} ms)\", bytes >> 20, t.elapsed().as_millis());\n"
+          "            *g = Some(std::sync::Arc::new(gpu));\n"
+          "        }\n"
+          "        Err(e) => log::warn!(\"[render] sem conexão própria com a placa ({e}); usa a da janela\"),\n"
+          "    }\n"
+          "}\n\n"
+          "#[cfg(not(target_arch = \"wasm32\"))]\n"
+          "fn esperar_gpu_janela(app: &mut EffectcraftApp, ctx: &egui::Context, params: &Value) -> bool {\n")
+    # janela caiu: aviso em português e reabre sozinho
+    m = "apps/effectcraft/src/main.rs"
+    troca(r, m, '                        .set_title("EffectCraft: graphics device lost")\n'
+              '                        .set_description(format!("The graphics driver stopped responding, so EffectCraft has to close.{saved}"))\n'
+              '                        .show();\n',
+          '                        .set_title("Arcano Layers: a placa de vídeo parou de responder")\n'
+          '                        .set_description(format!("A placa de vídeo parou de responder. O Arcano Layers vai fechar e abrir de novo sozinho, e oferece recuperar o projeto.{saved}"))\n'
+          '                        .show();\n'
+          '                    ARCANO_REABRIR.store(true, std::sync::atomic::Ordering::SeqCst);\n')
+    troca(r, m, '                        Some(Ok(path)) => format!("\\n\\nYour unsaved changes were saved to:\\n{path}\\n\\nReopen EffectCraft to recover them."),\n'
+              '                        Some(Err(e)) => format!("\\n\\nYour unsaved changes could not be saved ({e})."),\n',
+          '                        Some(Ok(path)) => format!("\\n\\nO que não estava salvo foi guardado em:\\n{path}"),\n'
+          '                        Some(Err(e)) => format!("\\n\\nNão deu para guardar o que não estava salvo ({e})."),\n')
+    troca(r, m, "    if let Err(e) = &result {\n        if on_gl {\n",
+          "    if ARCANO_REABRIR.load(std::sync::atomic::Ordering::SeqCst)\n"
+          "        && let Ok(exe) = std::env::current_exe()\n"
+          "    {\n"
+          "        log::warn!(\"a placa de vídeo caiu: abrindo o programa de novo\");\n"
+          "        let _ = std::process::Command::new(exe).spawn();\n"
+          "    }\n"
+          "    if let Err(e) = &result {\n        if on_gl {\n")
+    t = (pathlib.Path(r) / m).read_text(encoding="utf-8")
+    t += "\n/// Arcano: a conexão da janela com a placa caiu → abrir o programa de novo ao fechar.\nstatic ARCANO_REABRIR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);\n"
+    (pathlib.Path(r) / m).write_text(t, encoding="utf-8")
+
+
 def desktop(app, raiz):
     """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
     que só existem no programa de computador (janela, diálogos)."""
@@ -1994,6 +2078,7 @@ def desktop(app, raiz):
               "            let _ = &app;\n            crate::ARCANO_CONFERIR_ATUALIZACAO.store(true, std::sync::atomic::Ordering::Relaxed);\n            Value::Null")
         procurar_atualizacao(raiz, "effectcraft")
         guarda_travamento(raiz)
+        placa_caiu(raiz)
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
         troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
         troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')
