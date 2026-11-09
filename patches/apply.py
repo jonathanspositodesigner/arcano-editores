@@ -312,6 +312,7 @@ pub(crate) const GATE: &str =""")
           '    if !media.is_empty() && effectcraft_ui_egui::panels::dialogs::open_form(app, "file.import", &json!({"paths": media.clone()})) {\n'
           '        return;\n    }\n'
           '    if !media.is_empty() {\n        match app.session.execute("file.import", json!({"paths": media})) {')
+    psd_achatado(r)
     psd_fiel(r)
     fontes_pc(r)
     projeto_after(r)
@@ -1508,6 +1509,49 @@ def fontes_pc(r):
           "effectcraft-ui-egui = { workspace = true }\neffectcraft-psd = { workspace = true }\neffectcraft-text = { workspace = true }\n")
     # o montar.js (painel) lê os pedidos de fonte pelo window.effectcraft.arcano
     troca(r, "apps/effectcraft-web/web/index.html", "      files: () => ec.files(),\n", "      arcano: ec,\n      files: () => ec.files(),\n")
+
+
+def psd_achatado(r):
+    """Objeto inteligente BRANCO (09/11/2026, flyer "PRÓXIMOS SHOWS - GABZIN ST": cantor, pincéis e estrelas
+    viravam retângulos brancos). O .psb dentro do objeto inteligente foi salvo sem "Maximizar compatibilidade":
+    a imagem mesclada dele é branca (recurso 1057 hasRealMergedData = 0) e o editor usava essa mesclada.
+    `Psd::achatada()` (arquivos/psd-arcano-achatar.rs) compõe as camadas quando a mesclada não é de verdade
+    (ou é de cor única num documento com camadas). Vale para o objeto inteligente e para o PSD importado como
+    arquivo único. Tamanho do conteúdo: o do documento de dentro (o `Sz` gravado às vezes é outro)."""
+    copia(pathlib.Path(__file__).parent / "arquivos/psd-arcano-achatar.rs", pathlib.Path(r) / "crates/psd/src/arcano_achatar.rs")
+    # Objeto inteligente COM pixels gravados: usa os pixels da camada, como o After faz e como o Photoshop
+    # mostra (já com filtro inteligente, composição de camadas do arquivo de dentro, distorção e o conteúdo
+    # aninhado atualizado). O arquivo de dentro pode estar desatualizado ou ser outro (no flyer do Gabzin o
+    # pincel de dentro é azul e o Photoshop mostra roxo). Sem pixels gravados, continua pelo arquivo de dentro.
+    troca(r, "crates/engine/src/interchange/psd_import.rs",
+          "    } else if let Some(l) = pl.smart_object.as_ref().and_then(|_| smart_object_layer(proj, cx, comp, index, &name)) {",
+          "    } else if let Some(l) = pl.smart_object.as_ref().filter(|_| !pl.has_pixels()).and_then(|_| smart_object_layer(proj, cx, comp, index, &name)) {")
+    troca(r, "crates/psd/src/lib.rs", "#[cfg(test)]\nmod memory_tests;\n", "mod arcano_achatar;\n#[cfg(test)]\nmod memory_tests;\n")
+    troca(r, "crates/psd/src/lib.rs", "    data: Arc<[u8]>,\n    merged_offset: usize,\n}",
+          "    data: Arc<[u8]>,\n    merged_offset: usize,\n"
+          "    /// Arcano: o recurso 1057 diz se a imagem mesclada é de verdade (`None`: sem o recurso).\n"
+          "    pub arcano_mesclada_real: Option<bool>,\n}")
+    pa = "crates/psd/src/parse.rs"
+    troca(r, pa, "        // Image resources.\n        let n = r.u32()? as usize;\n        r.skip(n)?;\n",
+          "        // Image resources.\n        let n = r.u32()? as usize;\n        let ini_recursos = r.pos;\n        r.skip(n)?;\n"
+          "        let arcano_mesclada_real = super::arcano_achatar::mesclada_real(&data, ini_recursos, ini_recursos + n);\n")
+    troca(r, pa, "            data: data.clone(),\n            merged_offset: 0,\n        };",
+          "            data: data.clone(),\n            merged_offset: 0,\n            arcano_mesclada_real,\n        };")
+    la = "crates/media/src/layered.rs"
+    troca(r, la, "                inner.composite().map_err(|e| MediaError::Decode(format!(\"{path} (smart object): {e}\")))?",
+          "                inner.achatada().map_err(|e| MediaError::Decode(format!(\"{path} (smart object): {e}\")))?")
+    troca(r, la, "            None => psd.composite(),", "            None => psd.achatada(),")
+    # tamanho do conteúdo pelo documento de dentro (o objeto inteligente "ESTRELA SPRAY" grava Sz 1184×348 e o
+    # .psb de dentro tem 690×710): a imagem decodificada tem o tamanho do documento; o posicionamento usa o
+    # mesmo tamanho, então o quadro do Photoshop continua coberto igual
+    troca(r, "crates/engine/src/interchange/psd_import.rs",
+          "fn embedded_size(so: &effectcraft_psd::SmartObject, data: &[u8]) -> Option<(u32, u32)> {\n",
+          "fn embedded_size(so: &effectcraft_psd::SmartObject, data: &[u8]) -> Option<(u32, u32)> {\n"
+          "    // Arcano: documento do Photoshop dentro: vale o tamanho dele (é o tamanho da imagem decodificada)\n"
+          "    if effectcraft_psd::is_psd(data) && data.len() >= 22 {\n"
+          "        let h = u32::from_be_bytes([data[14], data[15], data[16], data[17]]);\n"
+          "        let w = u32::from_be_bytes([data[18], data[19], data[20], data[21]]);\n"
+          "        if w > 0 && h > 0 {\n            return Some((w, h));\n        }\n    }\n")
 
 
 def psd_fiel(r):
