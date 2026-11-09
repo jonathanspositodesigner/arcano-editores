@@ -44,6 +44,59 @@ pub fn memoria_texto() -> String {
     }
 }
 
+
+// ---------------------------------------------------------------- o que o programa está fazendo
+
+static ETAPA: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Anota o que a janela está fazendo agora (vai junto no [TRAVOU]). Nunca espera.
+pub fn etapa(s: &str) {
+    if let Ok(mut g) = ETAPA.try_lock() {
+        g.clear();
+        g.push_str(s);
+    }
+}
+
+/// O que a janela estava fazendo por último.
+pub fn etapa_atual() -> String {
+    ETAPA.try_lock().map(|g| g.clone()).unwrap_or_else(|_| "?".into())
+}
+
+/// Mede um trecho: anota a etapa e, se passar de `limite_ms`, escreve `[lento]` no registro
+/// com o tempo e a memória. Volta a etapa anterior no fim. No navegador não faz nada.
+pub struct Medida {
+    #[cfg(not(target_arch = "wasm32"))]
+    dados: Option<(String, std::time::Instant, u128, String)>,
+}
+
+pub fn medir(nome: impl Into<String>, limite_ms: u128) -> Medida {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let nome = nome.into();
+        let anterior = etapa_atual();
+        etapa(&nome);
+        Medida { dados: Some((nome, std::time::Instant::now(), limite_ms, anterior)) }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (nome.into(), limite_ms);
+        Medida {}
+    }
+}
+
+impl Drop for Medida {
+    fn drop(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some((nome, ini, limite, anterior)) = self.dados.take() {
+            let ms = ini.elapsed().as_millis();
+            if ms > limite {
+                log::warn!("[lento] {nome}: {ms} ms ({})", memoria_texto());
+            }
+            etapa(&anterior);
+        }
+    }
+}
+
 #[cfg(windows)]
 static PASTA: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
@@ -138,7 +191,7 @@ unsafe extern "system" fn caiu(p: *const windows::Win32::System::Diagnostics::De
     let linha = unsafe { GetCurrentThreadId() };
     // retrato primeiro (o registro pode estar travado pela própria linha que caiu)
     let feito = retrato("caiu", Some((p, linha)));
-    log::error!("[CAIU] erro fatal do Windows 0x{codigo:08X} ({})", memoria_texto());
+    log::error!("[CAIU] erro fatal do Windows 0x{codigo:08X}, fazendo: {} ({})", etapa_atual(), memoria_texto());
     log::error!("[CAIU] retrato: {}", feito.map_or_else(|| "não deu para gravar".into(), |c| c.display().to_string()));
     log::logger().flush();
     0 // EXCEPTION_CONTINUE_SEARCH: o Windows segue e fecha como antes
@@ -181,12 +234,12 @@ fn vigia(_pasta: PathBuf) {
             parado += 1;
             if parado == LIMITE && !gravou {
                 gravou = true;
-                log::error!("[TRAVOU] a janela parou de responder há {LIMITE} s ({})", memoria_texto());
+                log::error!("[TRAVOU] a janela parou de responder há {LIMITE} s, fazendo: {} ({})", etapa_atual(), memoria_texto());
                 let r = retrato("travou", None);
                 log::error!("[TRAVOU] retrato: {}", r.map_or_else(|| "não deu para gravar".into(), |c| c.display().to_string()));
                 log::logger().flush();
             } else if parado % 30 == 0 && parado > LIMITE {
-                log::error!("[TRAVOU] ainda parado: {parado} s ({})", memoria_texto());
+                log::error!("[TRAVOU] ainda parado: {parado} s, fazendo: {} ({})", etapa_atual(), memoria_texto());
                 log::logger().flush();
             }
         } else {

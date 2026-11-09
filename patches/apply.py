@@ -323,6 +323,7 @@ pub(crate) const GATE: &str =""")
     psd_uma_vez(r)
     gpu_camadas(r)
     guarda_crate(r)
+    registro_completo(r)
     render_rapido(r)
     previa_guardada(r)
     destino_navegador(r)
@@ -1850,8 +1851,8 @@ def guarda_travamento(r):
     "Não respondendo" e nada no registro dizia onde. (1) Vigia de travamento e retrato de queda
     (crate arcano-guarda): parado 8 s grava [TRAVOU] + travou-<data>.dmp na pasta Logs; erro fatal
     grava [CAIU] + caiu-<data>.dmp. (2) Guarda os registros das últimas 8 aberturas (eram 2: depois
-    de 3 quedas o da 1ª já tinha sumido). (3) Salvamento automático a cada 2 min (eram 20: perdia
-    até 20 min de trabalho; quem escolheu outro valor que não 20 fica com o dele). (4) Ajuda ▸
+    de 3 quedas o da 1ª já tinha sumido). (3) Salvamento automático a cada 10 min (dono; eram 20; quem escolheu
+    outro valor que não 20 fica com o dele). (4) Ajuda ▸
     Abrir pasta de erros e registros. (5) Registro de quanto cada salvamento levou."""
     troca(r, "apps/effectcraft/Cargo.toml", "[dependencies]\n", "[dependencies]\narcano-guarda = { path = \"../../crates/arcano-guarda\" }\n")
     troca(r, "apps/effectcraft/src/main.rs",
@@ -1861,11 +1862,11 @@ def guarda_travamento(r):
           '                arcano_guarda::ligar(effectcraft_engine::logging::log_dir(Some(&dir)));\n'
           '            }\n')
     troca(r, "crates/engine/src/system/logging.rs", "pub const KEEP: usize = 2;\n", "pub const KEEP: usize = 8;\n")
-    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    interval_minutes: u32 = 20,\n", "    interval_minutes: u32 = 2,\n")
+    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    interval_minutes: u32 = 20,\n", "    interval_minutes: u32 = 10,\n")
     troca(r, "crates/engine/src/settings/session_settings.rs",
           "        let interval = a.interval_minutes.max(1) as f64 * 60.0;\n",
-          "        // Arcano: 20 era o padrão antigo (preferência já gravada com ele) → 2 min\n"
-          "        let minutos = if a.interval_minutes == 20 { 2 } else { a.interval_minutes };\n"
+          "        // Arcano: 20 era o padrão antigo (preferência já gravada com ele) → 10 min (dono, 08/11/2026)\n"
+          "        let minutos = if a.interval_minutes == 20 { 10 } else { a.interval_minutes };\n"
           "        let interval = minutos.max(1) as f64 * 60.0;\n")
     # salvar: quanto levou (o salvamento roda na janela; se demora, a janela para enquanto isso)
     troca(r, "crates/engine/src/cmd/file.rs",
@@ -1891,6 +1892,90 @@ def guarda_travamento(r):
           "        return Ok(Value::Null);\n"
           "    }\n"
           "    if id == \"arcano.hdTrabalho\" {\n")
+
+
+def registro_completo(r):
+    """Dono, 08/11/2026: "deixa o programa robusto com tudo registrado pra descobrir o que tá lento e o
+    que tá travando". No registro (Logs/effectcraft.log), além do [TRAVOU]/[CAIU] (guarda_travamento):
+    - [lento] janela: lógica/desenho que passou de 0,7 s (a janela fica parada esse tempo);
+    - [lento] comando <id>: todo comando (menu, atalho, painel) que passou de 0,3 s;
+    - [lento] GPU: leitura da placa que passou de 1,5 s, com a linha de execução (main = a janela);
+    - [render] a cada 150 quadros: tempo do quadro (render) e da codificação H.264/áudio, pra ver qual
+      dos dois segura o vídeo; e o [TRAVOU] diz a última etapa (lógica, desenho ou o comando).
+    No navegador as medidas não fazem nada (sem relógio no wasm)."""
+    troca(r, "crates/ui-egui/src/app.rs", "        self.tick(ctx, frame);\n        self.finish_ime_logic(ctx);\n",
+          "        let _medida = arcano_guarda::medir(\"janela: lógica\", 700);\n        self.tick(ctx, frame);\n        self.finish_ime_logic(ctx);\n")
+    troca(r, "crates/ui-egui/src/app.rs", "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        self.draw(ui, frame);\n",
+          "    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {\n        let _medida = arcano_guarda::medir(\"janela: desenho\", 700);\n        self.draw(ui, frame);\n")
+    troca(r, "crates/ui-egui/src/menus/invoke.rs",
+          "pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {\n",
+          "pub fn invoke(app: &mut EffectcraftApp, ctx: &egui::Context, id: &str, params: Value) -> Result<Value, String> {\n"
+          "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n")
+    troca(r, "crates/gpu/src/context.rs", "        let deadline = std::time::Instant::now() + crate::readback::TIMEOUT;\n",
+          "        // Arcano: leitura da placa que demora (na linha \"main\" a janela fica parada esse tempo)\n"
+          "        struct ArcanoLeitura(std::time::Instant);\n"
+          "        impl Drop for ArcanoLeitura {\n"
+          "            fn drop(&mut self) {\n"
+          "                let ms = self.0.elapsed().as_millis();\n"
+          "                if ms > 1500 {\n"
+          "                    log::warn!(\"[lento] GPU: leitura levou {ms} ms (linha {})\", std::thread::current().name().unwrap_or(\"?\"));\n"
+          "                }\n"
+          "            }\n"
+          "        }\n"
+          "        let _arcano_leitura = ArcanoLeitura(std::time::Instant::now());\n"
+          "        let deadline = std::time::Instant::now() + crate::readback::TIMEOUT;\n")
+    # render: tempo do quadro x tempo da codificação
+    e = "crates/export/src/encode.rs"
+    troca(r, e, "    let mut i = first_end;\n    while i < total {\n",
+          "    let mut i = first_end;\n"
+          "    // Arcano: microssegundos gastos na codificação (vídeo) e no áudio, e o tempo de cada lote\n"
+          "    let arcano_cod = std::sync::atomic::AtomicU64::new(0);\n"
+          "    let arcano_aud = std::sync::atomic::AtomicU64::new(0);\n"
+          "    let mut arcano_lote = (0u64, 0u64, first_end);\n"
+          "    while i < total {\n"
+          "        #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "        let arcano_t0 = std::time::Instant::now();\n")
+    troca(r, e,
+          "                for (k, px) in frames.iter().enumerate() {\n"
+          "                    let ps = encode(&mut venc, px, i + k as u64)?;\n"
+          "                    write_video(&mut mux, ps)?;\n"
+          "                }\n"
+          "                write_audio_until(&mut mux, frame_end_time(end), &mut cursor)\n",
+          "                #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "                let t = std::time::Instant::now();\n"
+          "                for (k, px) in frames.iter().enumerate() {\n"
+          "                    let ps = encode(&mut venc, px, i + k as u64)?;\n"
+          "                    write_video(&mut mux, ps)?;\n"
+          "                }\n"
+          "                #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "                arcano_cod.fetch_add(t.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);\n"
+          "                #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "                let t = std::time::Instant::now();\n"
+          "                let r = write_audio_until(&mut mux, frame_end_time(end), &mut cursor);\n"
+          "                #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "                arcano_aud.fetch_add(t.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);\n"
+          "                r\n")
+    troca(r, e, "        done?;\n        ready = next;\n        st.advance(end - i)?;\n        i = end;\n",
+          "        done?;\n        ready = next;\n        st.advance(end - i)?;\n"
+          "        #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "        {\n"
+          "            arcano_lote.0 += arcano_t0.elapsed().as_micros() as u64;\n"
+          "            arcano_lote.1 += end - i;\n"
+          "            if arcano_lote.1 >= 150 || end >= total {\n"
+          "                let n = arcano_lote.1.max(1) as f64;\n"
+          "                let cod = arcano_cod.swap(0, std::sync::atomic::Ordering::Relaxed) as f64;\n"
+          "                let aud = arcano_aud.swap(0, std::sync::atomic::Ordering::Relaxed) as f64;\n"
+          "                log::info!(\n"
+          "                    \"[render] quadros {}–{} de {}: {:.0} ms/quadro no total; codificar o vídeo {:.0} ms/quadro, áudio {:.0} ms/quadro (render e codificação andam juntos: o maior dos dois manda)\",\n"
+          "                    arcano_lote.2, end, total, arcano_lote.0 as f64 / 1000.0 / n, cod / 1000.0 / n, aud / 1000.0 / n\n"
+          "                );\n"
+          "                arcano_lote = (0, 0, end);\n"
+          "            }\n"
+          "        }\n"
+          "        i = end;\n")
+    troca(r, "crates/gpu/Cargo.toml", "[dependencies]\n", "[dependencies]\nlog = { workspace = true }\n") if "\nlog" not in (pathlib.Path(r) / "crates/gpu/Cargo.toml").read_text(encoding="utf-8") else None
+    if "arcano-guarda" not in (pathlib.Path(r) / "crates/ui-egui/Cargo.toml").read_text(encoding="utf-8"):
+        raise SystemExit("ERRO: registro_completo precisa do guarda_crate antes")
 
 
 def desktop(app, raiz):
