@@ -237,6 +237,27 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
     }
     // fim do render → aviso
     let renderizando = app.session.is_rendering();
+    // registro do ritmo a cada 150 quadros (pra achar render que fica lento no meio, vídeo longo)
+    if renderizando && let Some(pr) = app.session.render_progress() {
+        static MARCA: std::sync::Mutex<(u64, f64)> = std::sync::Mutex::new((0, 0.0));
+        let mut m = MARCA.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pr.done < m.0 {
+            *m = (0, 0.0);
+        }
+        if pr.done >= m.0 + 150 && pr.item_elapsed > m.1 {
+            let n = pr.done - m.0;
+            let ms = (pr.item_elapsed - m.1) * 1000.0 / n as f64;
+            log::info!(
+                "[render] quadro {}/{} · {:.0} ms/quadro nos últimos {n} · {} · {}",
+                pr.done,
+                pr.total,
+                ms,
+                if pr.gpu { "GPU" } else { "Processador" },
+                arcano_guarda::memoria_texto()
+            );
+            *m = (pr.done, pr.item_elapsed);
+        }
+    }
     let mut g = CONCLUIDO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if g.renderizando && !renderizando {
         // o item que terminou por último (o mais recente a começar)
@@ -244,6 +265,7 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
         if let Some(i) = ultimo {
             match &i.status {
                 RenderStatus::Done => {
+                    log::info!("[render] concluído: {} ({})", i.last_output.clone().unwrap_or_default(), arcano_guarda::memoria_texto());
                     if let Some(c) = i.last_output.clone()
                         && !cfg!(target_arch = "wasm32")
                         && app.hooks.pick_save.is_some()

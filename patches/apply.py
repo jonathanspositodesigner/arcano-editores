@@ -322,12 +322,16 @@ pub(crate) const GATE: &str =""")
     coletar_arquivos(r)
     psd_uma_vez(r)
     gpu_camadas(r)
+    guarda_crate(r)
     render_rapido(r)
     previa_guardada(r)
     destino_navegador(r)
     worker_que_tenta_de_novo(r)
     worker_com_memoria_de_navegador(r)
     caminho_do_navegador(r)
+    desfoque_3d_navegador(r)
+    imagem_grande_navegador(r)
+    ladrilho_navegador(r)
     tempo_real(r)
     render_simples(r)
     # render_gpu_propria(r): DESLIGADO (05/11, pedido do dono): a 2ª GPU só do render enchia a memória de
@@ -953,10 +957,17 @@ def worker_com_memoria_de_navegador(r):
           "    // Arcano: limite de navegador, igual ao da página (WEB_MEDIA_CACHE = 256 MB; antes 1 GB, o padrão de PC)\n"
           "    let pool = Arc::new(effectcraft_media::MediaPool::with_budget(256 << 20));\n"
           "    POOL.with(|p| *p.borrow_mut() = Some(pool.clone()));\n")
+    # e os caches da sessão do worker (camadas da prévia/render) com os limites de navegador, como a página
+    troca(r, "apps/effectcraft-web/src/worker.rs",
+          "        ..Default::default()\n    };\n    SESSION.with(|c| *c.borrow_mut() = Some(s));\n}\n",
+          "        ..Default::default()\n    };\n"
+          "    // Arcano: os limites de memória de navegador (cache de camadas 512 MB, mídia 256 MB), como na página\n"
+          "    let mut s = s;\n    s.apply_cache_budgets();\n"
+          "    SESSION.with(|c| *c.borrow_mut() = Some(s));\n}\n")
     troca(r, "crates/export/src/pipeline.rs",
           "        let cache = LayerCache::default();\n        // With deferred readbacks,",
-          "        // Arcano: no navegador o worker tem 4 GB pra tudo; o cache de camadas do render fica em 384 MB (antes 1 GB)\n"
-          "        #[cfg(target_arch = \"wasm32\")]\n        let cache = LayerCache::new(384 << 20);\n"
+          "        // Arcano: no navegador o worker tem 4 GB pra tudo; o cache de camadas do render fica em 128 MB (antes 1 GB)\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n        let cache = LayerCache::new(128 << 20);\n"
           "        #[cfg(not(target_arch = \"wasm32\"))]\n        let cache = LayerCache::default();\n        // With deferred readbacks,")
 
 
@@ -973,6 +984,181 @@ def caminho_do_navegador(r):
           "    if stored.starts_with('/') && !stored.starts_with(\"//\") && !stored.split('/').any(|c| c == \"..\") {\n"
           "        return Ok(PathBuf::from(stored));\n"
           "    }\n")
+
+
+def imagem_grande_navegador(r):
+    """ARCANO • LED DJ GUUGA no navegador: a camada 'COR DO FUNDO' é uma imagem de 7684×4324 (PSD);
+    em resolução cheia o buffer dela tem 33 M px (16 B/px = 531 MB, mais a cópia) e montá-la levou o
+    worker de 774 MB a 2836 MB num passo só (medido com memory_size no worker); o quadro seguinte
+    passou de 4 GB. SÓ NO NAVEGADOR (wasm): imagem/vídeo com mais de ~8 M px na escala do render é
+    pedida já reduzida a ~8 M px (≈ 4× um quadro 1080p: quase nunca aparece). PC não muda nada."""
+    f = "crates/render/src/pipeline.rs"
+    troca(r, f, "        let s = self.opts.scale;\n        (s < 0.75).then(",
+          "        let s = self.opts.scale;\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n"
+          "        {\n"
+          "            let px = w as f64 * h as f64 * s * s;\n"
+          "            if px > 8.0e6 {\n"
+          "                let k = s * (8.0e6 / px).sqrt();\n"
+          "                return Some((((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1)));\n"
+          "            }\n"
+          "        }\n"
+          "        (s < 0.75).then(")
+    # o buffer reduzido assim tem a escala dele (no PC continua a do render)
+    troca(r, f, "            Some(size) if (img.width, img.height) == size => Buf { img: img.clone(), offset: [0.0; 2], scale: s },\n",
+          "            #[cfg(target_arch = \"wasm32\")]\n"
+          "            Some(size) if (img.width, img.height) == size => Buf { img: img.clone(), offset: [0.0; 2], scale: size.0 as f64 / w.max(1) as f64 },\n"
+          "            #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "            Some(size) if (img.width, img.height) == size => Buf { img: img.clone(), offset: [0.0; 2], scale: s },\n")
+    # imagem que veio maior que o orçamento mesmo assim (a interpretação por pixel pede o quadro inteiro):
+    # reduzida aqui, antes de virar buffer de camada (que fica guardado e passa pelo 3D/desfoque)
+    troca(r, f, "        let mut buf = match self.reduced_size(w, h) {\n",
+          "        #[cfg(target_arch = \"wasm32\")]\n"
+          "        let reduzida;\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n"
+          "        let img = {\n"
+          "            let px = img.width as f64 * img.height as f64;\n"
+          "            if px > 8.0e6 {\n"
+          "                let q = (8.0e6 / px).sqrt();\n"
+          "                reduzida = effectcraft_raster::resample(img, ((img.width as f64 * q).round() as u32).max(1), ((img.height as f64 * q).round() as u32).max(1));\n"
+          "                &reduzida\n"
+          "            } else {\n"
+          "                img\n"
+          "            }\n"
+          "        };\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n"
+          "        let k = if img.width > 0 { w.max(1) as f64 / img.width as f64 } else { 1.0 };\n"
+          "        let mut buf = match self.reduced_size(w, h) {\n")
+    troca(r, f, "            Some((rw, rh)) if k <= 1.0 + 1e-9 => Buf { img: effectcraft_raster::resample(img, rw, rh), offset: [0.0; 2], scale: s },\n",
+          "            #[cfg(target_arch = \"wasm32\")]\n"
+          "            Some((rw, rh)) if k <= 1.0 + 1e-9 => Buf { img: effectcraft_raster::resample(img, rw, rh), offset: [0.0; 2], scale: rw as f64 / w.max(1) as f64 },\n"
+          "            #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "            Some((rw, rh)) if k <= 1.0 + 1e-9 => Buf { img: effectcraft_raster::resample(img, rw, rh), offset: [0.0; 2], scale: s },\n")
+
+
+def ladrilho_navegador(r):
+    """O que estourava de verdade o ARCANO • LED DJ GUUGA no navegador: a camada 'COR DO FUNDO'
+    (1920×1080) tem Motion Tile com saída de 400% → buffer de 7684×4324 (33 M px, 531 MB por cópia),
+    e as cópias dele (estilos, 3D, desfoque) levaram o worker de 774 MB a 2836 MB e depois a 4 GB
+    (medido: footage 1920×1080, plano 7684×4324). SÓ NO NAVEGADOR (wasm): antes da pilha de efeitos,
+    se o Motion Tile ligado vai fazer o buffer passar de ~8 M px, a entrada é reduzida pra caber (os
+    efeitos usam a escala do buffer, então o desenho sai igual, só com menos pixels). PC não muda."""
+    f = "crates/render/src/pipeline.rs"
+    troca(r, f, "        let origin = if adjustment { [0.0; 2] } else { ctx.effect_bounds(layer).1 };\n        buf.rebase(origin);\n",
+          "        let origin = if adjustment { [0.0; 2] } else { ctx.effect_bounds(layer).1 };\n"
+          "        #[cfg(target_arch = \"wasm32\")]\n"
+          "        if !adjustment && layer.switches.effects && let Some(fx) = layer.effects() {\n"
+          "            let mut cresce = 1.0f64;\n"
+          "            for g in fx.groups().take(limit).filter(|g| g.enabled) {\n"
+          "                if matches!(&g.kind, GroupKind::Effect { effect } if effect == \"ec.stylize.motiontile\") {\n"
+          "                    let p = self.effect_params(ctx, layer, g);\n"
+          "                    cresce *= (p.f(\"outputWidth\") / 100.0).max(1.0) * (p.f(\"outputHeight\") / 100.0).max(1.0);\n"
+          "                }\n"
+          "            }\n"
+          "            let px = buf.img.width as f64 * buf.img.height as f64 * cresce;\n"
+          "            if cresce > 1.0 && px > 8.0e6 && buf.img.width > 16 && buf.img.height > 16 {\n"
+          "                let q = (8.0e6 / px).sqrt();\n"
+          "                let (nw, nh) = (((buf.img.width as f64 * q).round() as u32).max(1), ((buf.img.height as f64 * q).round() as u32).max(1));\n"
+          "                let kx = nw as f64 / buf.img.width as f64;\n"
+          "                buf = Buf { img: effectcraft_raster::resample(&buf.img, nw, nh), offset: [buf.offset[0] * kx, buf.offset[1] * kx], scale: buf.scale * kx };\n"
+          "            }\n"
+          "        }\n"
+          "        buf.rebase(origin);\n")
+
+
+def desfoque_3d_navegador(r):
+    """Render do projeto ARCANO • LED DJ GUUGA caindo no navegador ("RuntimeError: unreachable" =
+    memória do worker acabou; medido com heaptrack, 1 núcleo como o worker): a profundidade de campo
+    da câmera 3D guarda uma cópia desfocada (com borda, 16 B/px) de CADA camada 3D do quadro ao mesmo
+    tempo — o 3D junta todas pixel a pixel por profundidade — e isso sozinho chegou a 2,65 GB; o worker
+    do navegador tem 4 GB pra tudo. SÓ NO NAVEGADOR (wasm): camada com desfoque de 4 px ou mais é
+    desfocada e guardada em meia resolução (memória ÷4; numa camada desfocada não há detalhe fino pra
+    perder). O programa de PC não muda nada."""
+    f = "crates/render/src/three_d/compose.rs"
+    # orçamento do desfoque: no navegador 4 M px por imagem com borda (antes 16 M: várias delas ao mesmo
+    # tempo davam ~2,6 GB num passo só, medido no worker). Com a meia resolução do desfoque grande, a
+    # borda máxima em pixels da tela continua a mesma.
+    troca(r, f, "const DOF_PAD_BUDGET: f64 = 16.0e6;\n",
+          "#[cfg(not(target_arch = \"wasm32\"))]\nconst DOF_PAD_BUDGET: f64 = 16.0e6;\n"
+          "#[cfg(target_arch = \"wasm32\")]\nconst DOF_PAD_BUDGET: f64 = 4.0e6;\n")
+    # cada camada 3D sem a borda transparente (pré-composições do tamanho da tela quase vazias: confete,
+    # raios...): o 3D guarda todas ao mesmo tempo; pixel transparente não aparece, o quadro sai igual
+    troca(r, f,
+          "    let PlaneInput { mut buf, local } = plane;\n    if buf.img.is_empty() {\n        return None;\n    }\n",
+          "    let PlaneInput { mut buf, local } = plane;\n    if buf.img.is_empty() {\n        return None;\n    }\n"
+          "    #[cfg(target_arch = \"wasm32\")]\n"
+          "    {\n        buf = match sem_borda_transparente(&buf) {\n            Some(b) => Arc::new(b),\n            None if buf.img.data.iter().all(|p| p[3] <= 0.0) => return None,\n            None => buf,\n        };\n    }\n")
+    troca(r, f,
+          "/// Depth of field for one plane: highlights boosted, then a bokeh-shaped blur by depth.\n",
+          "/// Arcano (só navegador): o buffer sem a borda totalmente transparente (`None`: não vale a pena\n"
+          "/// recortar, ou está todo transparente). Deslocamento ajustado: o quadro sai igual.\n"
+          "#[cfg(target_arch = \"wasm32\")]\n"
+          "fn sem_borda_transparente(b: &Buf) -> Option<Buf> {\n"
+          "    let (w, h) = (b.img.width as usize, b.img.height as usize);\n"
+          "    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0usize, 0usize);\n"
+          "    for y in 0..h {\n"
+          "        let linha = &b.img.data[y * w..(y + 1) * w];\n"
+          "        if let Some(a) = linha.iter().position(|p| p[3] > 0.0) {\n"
+          "            let z = linha.iter().rposition(|p| p[3] > 0.0).unwrap_or(a);\n"
+          "            x0 = x0.min(a);\n            x1 = x1.max(z + 1);\n            y0 = y0.min(y);\n            y1 = y + 1;\n"
+          "        }\n"
+          "    }\n"
+          "    if x1 <= x0 || y1 <= y0 {\n        return None;\n    }\n"
+          "    // 1 px de margem: a amostragem bilinear/bicúbica da borda continua igual\n"
+          "    let (x0, y0, x1, y1) = (x0.saturating_sub(2), y0.saturating_sub(2), (x1 + 2).min(w), (y1 + 2).min(h));\n"
+          "    let (nw, nh) = (x1 - x0, y1 - y0);\n"
+          "    if nw * nh * 10 > w * h * 8 {\n        return None;\n    }\n"
+          "    let mut img = Image::new(nw as u32, nh as u32);\n"
+          "    for y in 0..nh {\n"
+          "        img.data[y * nw..(y + 1) * nw].copy_from_slice(&b.img.data[(y0 + y) * w + x0..(y0 + y) * w + x1]);\n"
+          "    }\n"
+          "    Some(Buf { img, offset: [b.offset[0] - x0 as f64, b.offset[1] - y0 as f64], scale: b.scale })\n"
+          "}\n\n"
+          "/// Depth of field for one plane: highlights boosted, then a bokeh-shaped blur by depth.\n")
+    troca(r, f,
+          "fn dof_blur(cam: &CameraState, dof: &super::camera::Dof, world: Mat4, buf: Arc<Buf>) -> Arc<Buf> {\n"
+          "    let cap = dof_radius_cap(dof, buf.img.width, buf.img.height);\n"
+          "    let radii = dof_radii(cam, dof, world, &buf, cap);\n",
+          "fn dof_blur(cam: &CameraState, dof: &super::camera::Dof, world: Mat4, buf: Arc<Buf>) -> Arc<Buf> {\n"
+          "    let cap = dof_radius_cap(dof, buf.img.width, buf.img.height);\n"
+          "    let radii = dof_radii(cam, dof, world, &buf, cap);\n"
+          "    // Arcano (só navegador): desfoque grande → feito e guardado em meia resolução (memória ÷4)\n"
+          "    #[cfg(target_arch = \"wasm32\")]\n"
+          "    if buf.img.width >= 16 && buf.img.height >= 16 && radii.iter().copied().fold(0.0f32, f32::max) >= 4.0 {\n"
+          "        return dof_blur_inteiro(cam, dof, world, Arc::new(meia_resolucao(&buf)));\n"
+          "    }\n"
+          "    dof_blur_inteiro_com(cam, dof, world, buf, cap, radii)\n"
+          "}\n\n"
+          "/// Arcano: o buffer em meia resolução (média de 2×2), com escala e deslocamento ajustados.\n"
+          "#[cfg(target_arch = \"wasm32\")]\n"
+          "fn meia_resolucao(b: &Buf) -> Buf {\n"
+          "    let (w, h) = (b.img.width as usize, b.img.height as usize);\n"
+          "    let (w2, h2) = (w.div_ceil(2), h.div_ceil(2));\n"
+          "    let mut img = Image::new(w2 as u32, h2 as u32);\n"
+          "    for y in 0..h2 {\n"
+          "        for x in 0..w2 {\n"
+          "            let mut s = [0.0f32; 4];\n"
+          "            let mut n = 0.0f32;\n"
+          "            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {\n"
+          "                let (sx, sy) = (2 * x + dx, 2 * y + dy);\n"
+          "                if sx < w && sy < h {\n"
+          "                    let p = b.img.data[sy * w + sx];\n"
+          "                    for c in 0..4 {\n                        s[c] += p[c];\n                    }\n"
+          "                    n += 1.0;\n"
+          "                }\n"
+          "            }\n"
+          "            img.data[y * w2 + x] = [s[0] / n, s[1] / n, s[2] / n, s[3] / n];\n"
+          "        }\n"
+          "    }\n"
+          "    Buf { img, offset: [b.offset[0] * 0.5, b.offset[1] * 0.5], scale: b.scale * 0.5 }\n"
+          "}\n\n"
+          "#[cfg(target_arch = \"wasm32\")]\n"
+          "fn dof_blur_inteiro(cam: &CameraState, dof: &super::camera::Dof, world: Mat4, buf: Arc<Buf>) -> Arc<Buf> {\n"
+          "    let cap = dof_radius_cap(dof, buf.img.width, buf.img.height);\n"
+          "    let radii = dof_radii(cam, dof, world, &buf, cap);\n"
+          "    dof_blur_inteiro_com(cam, dof, world, buf, cap, radii)\n"
+          "}\n\n"
+          "fn dof_blur_inteiro_com(cam: &CameraState, dof: &super::camera::Dof, world: Mat4, buf: Arc<Buf>, cap: f64, radii: Vec<f32>) -> Arc<Buf> {\n")
 
 
 def destino_navegador(r):
@@ -1024,8 +1210,8 @@ def psd_uma_vez(r):
           "// navegador: a memória do wasm é curta (4 GB por página/worker, com os arquivos e caches juntos)\n"
           "#[cfg(not(target_arch = \"wasm32\"))]\nconst PSDS_MAXIMO: usize = 8;\n"
           "#[cfg(not(target_arch = \"wasm32\"))]\nconst PSDS_BYTES_MAXIMO: usize = 1536 << 20;\n"
-          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_MAXIMO: usize = 2;\n"
-          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_BYTES_MAXIMO: usize = 384 << 20;\n"
+          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_MAXIMO: usize = 1;\n"
+          "#[cfg(target_arch = \"wasm32\")]\nconst PSDS_BYTES_MAXIMO: usize = 1;\n"
           "fn carimbo_do_arquivo(path: &str) -> Option<u64> {\n"
           "    #[cfg(not(target_arch = \"wasm32\"))]\n"
           "    {\n"
@@ -1640,6 +1826,73 @@ def hd_trabalho(r):
           '    Snapshot | edit.purge {"what":"snapshot"} | Cmd+Shift+F5\n  HD de trabalho (cache)... | arcano.hdTrabalho\n')
 
 
+def guarda_crate(r):
+    """Crate arcano-guarda (arquivos/arcano-guarda.rs): vigia de travamento, retrato de queda e
+    memória do PC (Windows; nos outros sistemas não faz nada). Usado pelo registro do render
+    (ui-arcano-render.rs) nas duas versões e ligado no programa de PC (guarda_travamento)."""
+    d = pathlib.Path(r) / "crates/arcano-guarda"
+    (d / "src").mkdir(parents=True, exist_ok=True)
+    copia(pathlib.Path(__file__).parent / "arquivos/arcano-guarda.rs", d / "src/lib.rs")
+    (d / "Cargo.toml").write_text(
+        '[package]\nname = "arcano-guarda"\ndescription = "Arcano: vigia de travamento e retrato de queda"\n'
+        'version.workspace = true\nedition.workspace = true\nlicense.workspace = true\nrust-version.workspace = true\n'
+        '[dependencies]\nlog = { workspace = true }\n'
+        "[target.'cfg(windows)'.dependencies]\n"
+        'windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Diagnostics_Debug", "Win32_System_Kernel", '
+        '"Win32_System_Memory", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_ProcessStatus", '
+        '"Win32_System_SystemInformation", "Win32_UI_WindowsAndMessaging"] }\n', encoding="utf-8")
+    print("ok  crates/arcano-guarda")
+    troca(r, "crates/ui-egui/Cargo.toml", "[dependencies]\n", "[dependencies]\narcano-guarda = { path = \"../arcano-guarda\" }\n")
+
+
+def guarda_travamento(r):
+    """Programa de PC (vídeo), 08/11/2026: o dono perdeu o projeto 3 vezes num dia com o programa
+    "Não respondendo" e nada no registro dizia onde. (1) Vigia de travamento e retrato de queda
+    (crate arcano-guarda): parado 8 s grava [TRAVOU] + travou-<data>.dmp na pasta Logs; erro fatal
+    grava [CAIU] + caiu-<data>.dmp. (2) Guarda os registros das últimas 8 aberturas (eram 2: depois
+    de 3 quedas o da 1ª já tinha sumido). (3) Salvamento automático a cada 2 min (eram 20: perdia
+    até 20 min de trabalho; quem escolheu outro valor que não 20 fica com o dele). (4) Ajuda ▸
+    Abrir pasta de erros e registros. (5) Registro de quanto cada salvamento levou."""
+    troca(r, "apps/effectcraft/Cargo.toml", "[dependencies]\n", "[dependencies]\narcano-guarda = { path = \"../../crates/arcano-guarda\" }\n")
+    troca(r, "apps/effectcraft/src/main.rs",
+          '            Ok(path) => log::info!("effectcraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display()),\n',
+          '            Ok(path) => {\n'
+          '                log::info!("effectcraft {}, log file {}", env!("CARGO_PKG_VERSION"), path.display());\n'
+          '                arcano_guarda::ligar(effectcraft_engine::logging::log_dir(Some(&dir)));\n'
+          '            }\n')
+    troca(r, "crates/engine/src/system/logging.rs", "pub const KEEP: usize = 2;\n", "pub const KEEP: usize = 8;\n")
+    troca(r, "crates/engine/src/settings/prefs/sections.rs", "    interval_minutes: u32 = 20,\n", "    interval_minutes: u32 = 2,\n")
+    troca(r, "crates/engine/src/settings/session_settings.rs",
+          "        let interval = a.interval_minutes.max(1) as f64 * 60.0;\n",
+          "        // Arcano: 20 era o padrão antigo (preferência já gravada com ele) → 2 min\n"
+          "        let minutos = if a.interval_minutes == 20 { 2 } else { a.interval_minutes };\n"
+          "        let interval = minutos.max(1) as f64 * 60.0;\n")
+    # salvar: quanto levou (o salvamento roda na janela; se demora, a janela para enquanto isso)
+    troca(r, "crates/engine/src/cmd/file.rs",
+          "    if crate::arcano_pacote::empacotar(path) {\n        return crate::arcano_pacote::salvar(s, path);\n    }\n",
+          "    if crate::arcano_pacote::empacotar(path) {\n"
+          "        let t0 = std::time::Instant::now();\n"
+          "        log::info!(\"[salvar] começando: {path}\");\n"
+          "        let r = crate::arcano_pacote::salvar(s, path);\n"
+          "        log::info!(\"[salvar] {} em {:.1} s\", if r.is_ok() { \"ok\" } else { \"FALHOU\" }, t0.elapsed().as_secs_f64());\n"
+          "        return r;\n"
+          "    }\n")
+    # Ajuda ▸ Abrir pasta de erros e registros
+    troca(r, "crates/engine/src/menus.rs", "  Procurar atualização... | help.checkForUpdates\n",
+          "  Procurar atualização... | help.checkForUpdates\n  Abrir pasta de erros e registros | arcano.abrirRegistros\n")
+    troca(r, "crates/ui-egui/src/menus/entries.rs", '    if e.command == "help.checkForUpdates" {\n',
+          '    if e.command == "arcano.abrirRegistros" {\n        return true;\n    }\n    if e.command == "help.checkForUpdates" {\n')
+    troca(r, "crates/ui-egui/src/menus/invoke.rs", "    if id == \"arcano.hdTrabalho\" {\n",
+          "    if id == \"arcano.abrirRegistros\" {\n"
+          "        match effectcraft_engine::logging::session_file() {\n"
+          "            Some(f) => crate::arcano_render::abrir_pasta(&f.to_string_lossy()),\n"
+          "            None => app.ui.status = \"Sem pasta de registros nesta sessão\".into(),\n"
+          "        }\n"
+          "        return Ok(Value::Null);\n"
+          "    }\n"
+          "    if id == \"arcano.hdTrabalho\" {\n")
+
+
 def desktop(app, raiz):
     """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
     que só existem no programa de computador (janela, diálogos)."""
@@ -1655,6 +1908,7 @@ def desktop(app, raiz):
         troca(raiz, "crates/ui-egui/src/menus/frontend.rs", "            crate::updates_ui::check(app);\n            Value::Null",
               "            let _ = &app;\n            crate::ARCANO_CONFERIR_ATUALIZACAO.store(true, std::sync::atomic::Ordering::Relaxed);\n            Value::Null")
         procurar_atualizacao(raiz, "effectcraft")
+        guarda_travamento(raiz)
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
         troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
         troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')

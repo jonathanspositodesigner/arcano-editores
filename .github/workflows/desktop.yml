@@ -71,7 +71,14 @@ jobs:
         env:
           CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
           ARCANO_BUILD: ${{ github.run_number }}   # número da versão: o programa se compara com o publicado
+          CARGO_PROFILE_RELEASE_DEBUG: line-tables-only   # .pdb com as funções: lê os retratos de travamento/queda
         run: cargo build --release -p "$CRATE"  # sem --locked: o patch do painel acrescenta o wry
+      - name: Símbolos (.pdb) para ler os retratos de travamento
+        uses: actions/upload-artifact@v4
+        with:
+          name: simbolos-${{ matrix.app }}-${{ github.run_number }}
+          path: src/target/release/*.pdb
+          retention-days: 90
       - name: Arcano Conector (Node embutido)
         working-directory: site/conector
         run: |
