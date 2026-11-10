@@ -39,8 +39,10 @@ static PADRAO: Mutex<Option<HashSet<u64>>> = Mutex::new(None);
 
 /// Render Settings ▸ Resolution para o lado menor `n` (nunca acima de 1: menor que isso a comp não
 /// tem pixel a mais para dar, o Resize amplia como antes).
-fn escala_para(w: u32, h: u32, n: u32) -> f64 {
-    (n as f64 / w.min(h).max(1) as f64).min(1.0)
+/// RENDER ORIGINAL (dono, 10/11/2026): a composição sempre em tamanho cheio; 1080p/720p/480p só
+/// diminuem no fim (Resize do módulo de saída), como no editor original.
+fn escala_para(_w: u32, _h: u32, _n: u32) -> f64 {
+    1.0
 }
 
 /// As ações que levam o item `it` à opção escolhida (`None` = Original). Só manda o que muda: o
@@ -100,6 +102,7 @@ pub fn qualidade(app: &mut EffectcraftApp, ui: &mut egui::Ui, lp: &egui::Painter
             && it.last_output.is_none()
             && atual == Some(0)
             && w.min(h) > 1080
+            && false // RENDER ORIGINAL: item novo fica em "Original da composição"
         {
             acoes_qualidade(it, tamanhos[1], actions);
         }

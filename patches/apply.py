@@ -592,11 +592,7 @@ def programa_leve(r):
           "        self.enc.inicio()\n"
           "    }\n"
           "}\n")
-    troca(r, enc, "        OutputFormat::H264 => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n",
-          "        OutputFormat::H264 => match crate::arcano_placa::abrir(w, h, rate.num, rate.den, job.output.bitrate_kbps) {\n"
-          "            Some(e) => Box::new(H264NaPlaca { enc: e, w, h, y: vec![], u: vec![], v: vec![] }),\n"
-          "            None => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n"
-          "        },\n")
+    # RENDER ORIGINAL (dono, 10/11/2026): o H.264 do render volta a ser o do editor (sem NVENC)
     # preferências (ligadas por padrão)
     troca(r, "crates/engine/src/settings/prefs/sections.rs", "    fast_previews: bool = false,\n",
           "    fast_previews: bool = false,\n"
@@ -627,13 +623,7 @@ def programa_leve(r):
           "        }\n"
           "    }\n\n"
           "    pub fn clear(&self) {\n        if let Some(r) = &self.remote {\n")
-    troca(r, "crates/ui-egui/src/app/viewer_frames.rs",
-          "        let Some(c) = self.session.project.comp(comp) else { return };\n        let key = self.frame_key(comp, frame, scale);\n",
-          "        // Arcano: render rodando → a prévia não pede quadro (a placa fica pro render)\n"
-          "        if crate::arcano_render::previa_parada() {\n            return;\n        }\n"
-          "        let Some(c) = self.session.project.comp(comp) else { return };\n        let key = self.frame_key(comp, frame, scale);\n")
-    troca(r, "crates/ui-egui/src/app/frame.rs", "        self.apply_gpu_failure(ctx);\n",
-          "        self.apply_gpu_failure(ctx);\n        crate::arcano_render::previa_durante_render(self);\n")
+    # RENDER ORIGINAL (dono, 10/11/2026): a prévia não para nem encolhe a placa durante o render
     # prévias rápidas: resolução adaptável enquanto arrasta
     troca(r, "crates/engine/src/cmd/viewer_cmds.rs", "            fast_previews: FastPreviews::default(),\n",
           "            fast_previews: FastPreviews::AdaptiveResolution,\n")
@@ -684,10 +674,10 @@ def programa_leve_pc(r):
     troca(r, "apps/effectcraft/src/main.rs", "mod control_server;\n", "mod arcano_placa;\nmod control_server;\n")
     troca(r, "apps/effectcraft/src/main.rs", "    effectcraft_engine::text::fonts::scan_system_in_background();\n",
           "    effectcraft_engine::text::fonts::scan_system_in_background();\n"
-          "    // Arcano: placa de vídeo para abrir e gravar vídeo (Editar ▸ Usar a placa de vídeo)\n"
-          "    arcano_placa::ligar();\n")
+          "    // Arcano: placa de vídeo pra abrir e gravar vídeo DESLIGADA (dono, 10/11/2026: render como o original)\n"
+          "    let _ = arcano_placa::ligar;\n")
     troca(r, "crates/engine/src/menus.rs", "  Prévia leve (mais rápida) | arcano.previaLeve\n",
-          "  Prévia leve (mais rápida) | arcano.previaLeve\n  Usar a placa de vídeo (abrir e gravar vídeo) | arcano.placaVideo\n")
+          "  Prévia leve (mais rápida) | arcano.previaLeve\n") if False else None  # RENDER ORIGINAL: sem o item da placa
 
 
 def som_volta_logo(r):
@@ -997,12 +987,8 @@ def render_rapido(r):
     # encoder H.264: Speed
     troca(r, "crates/export/src/encode.rs",
           "        cfg.format = filmcraft_h264enc::PacketFormat::LengthPrefixed;\n        cfg.aud = false;\n",
-          "        cfg.format = filmcraft_h264enc::PacketFormat::LengthPrefixed;\n        cfg.aud = false;\n"
-          "        // Arcano: Speed (medido: 2,3× mais rápido que Balanced; no bitrate do app a diferença visual é mínima)\n"
-          "        cfg.preset = filmcraft_h264enc::Preset::Speed;\n")
+          "        cfg.format = filmcraft_h264enc::PacketFormat::LengthPrefixed;\n        cfg.aud = false;\n") if False else None  # RENDER ORIGINAL: preset do editor
     # o teste pina os bytes exatos do H.264 (preset Balanced): com Speed os bytes mudam, de propósito
-    troca(r, "crates/export/tests/it/movie_bytes.rs", "#[test]\nfn h264_movie_bytes_are_pinned() {",
-          "#[test]\n#[ignore = \"Arcano: H.264 com preset Speed, os bytes pinados eram do Balanced\"]\nfn h264_movie_bytes_are_pinned() {")
     # a fila sabe se o render usa a GPU
     rq = "crates/engine/src/render_queue.rs"
     troca(r, rq, "    pub items_total: usize,\n    pub finished: bool,\n}\n",
@@ -1035,10 +1021,7 @@ def render_rapido(r):
           "                    p = json!({\"wait\": false});\n"
           "                }\n"
           "                app.show_panel(PanelKind::RenderQueue);\n"
-          "                if crate::arcano_render::esperar_gpu(app, ctx, &p) {\n"
-          "                    return Ok(json!({\"adiado\": true}));\n"
-          "                }\n"
-          "                return app.session.execute(id, p).map_err(|e| e.to_string());\n", todas=True)
+          "                return app.session.execute(id, p).map_err(|e| e.to_string());\n", todas=True) if False else None  # RENDER ORIGINAL
     troca(r, "crates/ui-egui/src/app/frame.rs",
           "        crate::arcano_carregando::quadro(self, &ctx);\n",
           "        crate::arcano_carregando::quadro(self, &ctx);\n        crate::arcano_render::quadro(self, &ctx);\n")
@@ -2243,10 +2226,7 @@ def placa_caiu(r):
     usa a da janela, como antes. (2) Se a conexão da janela cair mesmo assim, o aviso fica em português e
     o programa ABRE DE NOVO sozinho quando fecha (oferece recuperar o projeto salvo na hora). Só PC."""
     rq = "crates/engine/src/render_queue.rs"
-    troca(r, rq, "        accel: s.accel.clone(),\n        exporter,\n",
-          "        accel: arcano_accel_render(&s.accel),\n        exporter,\n")
-    troca(r, rq, "            accel: self.accel.clone(),\n            exporter,\n",
-          "            accel: arcano_accel_render(&self.accel),\n            exporter,\n")
+    # RENDER ORIGINAL (dono, 10/11/2026): o render usa a placa da janela, como no editor original
     caminho = pathlib.Path(r) / rq
     t = caminho.read_text(encoding="utf-8")
     t += (
@@ -2343,10 +2323,7 @@ def placa_caiu(r):
           "fn esperar_gpu_janela(app: &mut EffectcraftApp, ctx: &egui::Context, params: &Value) -> bool {\n")
     # o botão Render manda {"wait": false} e não passa pelo esperar_gpu: preparar em todo renderQueue.render
     troca(r, "crates/ui-egui/src/menus/invoke.rs", "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n",
-          "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n"
-          "    if id == \"renderQueue.render\" && app.session.project.settings.gpu_acceleration && app.session.accel.is_some() {\n"
-          "        crate::arcano_render::gpu_do_render();\n"
-          "    }\n")
+          "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n") if False else None  # RENDER ORIGINAL
     troca(r, "crates/ui-egui/src/app/gpu.rs", "        let Some(rs) = frame.wgpu_render_state() else { return };\n        // Help ▸ System Compatibility Report names the adapter and backend the window got.\n",
           "        let Some(rs) = frame.wgpu_render_state() else { return };\n"
           "        *crate::arcano_render::ARCANO_ADAPTADOR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(rs.adapter.clone());\n"
