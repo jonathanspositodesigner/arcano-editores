@@ -293,8 +293,12 @@ pub fn quadro(app: &mut EffectcraftApp, ctx: &egui::Context) {
         if pr.done >= m.0 + 150 && pr.item_elapsed > m.1 {
             let n = pr.done - m.0;
             let ms = (pr.item_elapsed - m.1) * 1000.0 / n as f64;
+            #[cfg(not(target_arch = "wasm32"))]
+            let placa = placa_do_render_texto(app);
+            #[cfg(target_arch = "wasm32")]
+            let placa = String::new();
             log::info!(
-                "[render] quadro {}/{} · {:.0} ms/quadro nos últimos {n} · {} · {}",
+                "[render] quadro {}/{} · {:.0} ms/quadro nos últimos {n} · {} · {} · {placa}",
                 pr.done,
                 pr.total,
                 ms,
@@ -439,8 +443,16 @@ pub fn previa_durante_render(app: &mut EffectcraftApp) {
         app.stop();
         app.frames.arcano_largar_fila();
         if let Some(g) = &app.gpu {
-            g.context().set_upload_budget(64 << 20);
+            // Registro do dono (10/11/2026): com 64 MB aqui o render ficou em 2–3 s/quadro e
+            // "GPU upload cache full (64 MB) ... sobe de novo a cada quadro": o render estava na
+            // MESMA conexão da janela (o botão Render não passava pelo gancho da conexão própria),
+            // então o cache de 64 MB era o do render. Só encolhe se o render tem conexão própria.
             g.context().clear_uploads();
+            if render_tem_gpu_propria() {
+                g.context().set_upload_budget(64 << 20);
+            } else {
+                log::info!("[render] render na conexão da janela: cache de camadas mantido pro render");
+            }
         }
         // PC com pouca memória livre (registro de 09/11/2026: 7,8 GB usados, ~1 GB livre, travou 3
         // vezes): solta também os quadros da prévia guardados na memória (até 3 GB) pro render.
@@ -458,5 +470,17 @@ pub fn previa_durante_render(app: &mut EffectcraftApp) {
             crate::arcano_gpu::ajustar(g);
         }
         log::info!("[render] render acabou: prévia de volta");
+    }
+}
+
+/// O render está com a conexão própria com a placa (separada da janela).
+pub fn render_tem_gpu_propria() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        effectcraft_engine::render_queue::arcano_render_tem_propria()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
     }
 }
