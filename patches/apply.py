@@ -2386,6 +2386,221 @@ def placa_caiu(r):
     (pathlib.Path(r) / m).write_text(t, encoding="utf-8")
 
 
+def modo_capcut(r):
+    """Modo CapCut (dono, 13/11/2026, SÓ PRA ADMIN, teste de comparação): botão destacado na fila de
+    render "Render no modo CapCut". Ligado, o render vai como num editor de celular/CapCut: (1) as
+    imagens na placa em 8 bits (Rgba8Unorm, 4 B/px) em vez de 32 bits float (16 B/px): 4× menos
+    memória e tráfego com a placa, cor com 256 níveis e nada acima do branco; (2) numa conexão PRÓPRIA
+    com a placa (a janela continua em 32 bits); (3) H.264 pelo NVENC (só NVIDIA no Windows); (4) vídeo
+    aberto pelo decodificador do sistema (Media Foundation), vale pro vídeo aberto depois de ligar;
+    (5) 2 quadros na placa ao mesmo tempo. Desligado (padrão, e sempre ao abrir o programa) = o render
+    original. Admin = `admin_login_status` com o login do conta.json (o mesmo do plugin). Só PC."""
+    rp = "crates/render/src/arcano_placa.rs"
+    caminho = pathlib.Path(r) / rp
+    caminho.write_text(caminho.read_text(encoding="utf-8") + (
+        "\n/// Arcano (13/11/2026): modo CapCut do render (só admin; desligado ao abrir o programa).\n"
+        "static CAPCUT: AtomicBool = AtomicBool::new(false);\n"
+        "static AO_MUDAR_CAPCUT: OnceLock<fn(bool)> = OnceLock::new();\n"
+        "static ADMIN: AtomicBool = AtomicBool::new(false);\n"
+        "static PEDIR_ADMIN: OnceLock<fn()> = OnceLock::new();\n\n"
+        "/// O render vai no modo CapCut (8 bits na placa, NVENC, decodificador do sistema).\n"
+        "pub fn capcut() -> bool {\n"
+        "    CAPCUT.load(Ordering::Relaxed) && ADMIN.load(Ordering::Relaxed)\n"
+        "}\n\n"
+        "pub fn definir_capcut(on: bool) {\n"
+        "    let on = on && ADMIN.load(Ordering::Relaxed);\n"
+        "    if CAPCUT.swap(on, Ordering::Relaxed) != on {\n"
+        "        log::info!(\"[render] modo CapCut: {}\", if on { \"ligado\" } else { \"desligado\" });\n"
+        "        if let Some(f) = AO_MUDAR_CAPCUT.get() {\n"
+        "            f(on);\n"
+        "        }\n"
+        "    }\n"
+        "}\n\n"
+        "/// Programa de PC: o que fazer quando o modo CapCut muda (e já aplica o de agora).\n"
+        "pub fn ao_mudar_capcut(f: fn(bool)) {\n"
+        "    let _ = AO_MUDAR_CAPCUT.set(f);\n"
+        "    f(capcut());\n"
+        "}\n\n"
+        "/// A conta do ArcanoApp deste PC é admin (o programa de PC confere no servidor).\n"
+        "pub fn admin() -> bool {\n"
+        "    ADMIN.load(Ordering::Relaxed)\n"
+        "}\n\n"
+        "pub fn definir_admin(on: bool) {\n"
+        "    ADMIN.store(on, Ordering::Relaxed);\n"
+        "    if !on {\n"
+        "        definir_capcut(false);\n"
+        "    }\n"
+        "}\n\n"
+        "/// Programa de PC: como conferir se é admin.\n"
+        "pub fn ao_pedir_admin(f: fn()) {\n"
+        "    let _ = PEDIR_ADMIN.set(f);\n"
+        "}\n\n"
+        "/// A interface pede pra conferir (a fila de render aberta): no máximo 1 vez por minuto, e nunca\n"
+        "/// mais depois de confirmar que é admin. Sem relógio: só quando a fila aparece na tela.\n"
+        "pub fn pedir_admin() {\n"
+        "    static ULTIMA: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);\n"
+        "    if admin() {\n"
+        "        return;\n"
+        "    }\n"
+        "    let Some(f) = PEDIR_ADMIN.get() else { return };\n"
+        "    let mut u = ULTIMA.lock().unwrap_or_else(std::sync::PoisonError::into_inner);\n"
+        "    if u.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(60)) {\n"
+        "        return;\n"
+        "    }\n"
+        "    *u = Some(std::time::Instant::now());\n"
+        "    f();\n"
+        "}\n"), encoding="utf-8")
+
+    # ── placa em 8 bits (só a conexão do render no modo CapCut) ──
+    cx = "crates/gpu/src/context.rs"
+    troca(r, cx,
+          "    pub fn new(adapter: &wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Result<GpuContext, String> {\n        let info = adapter.get_info();\n",
+          "    pub fn new(adapter: &wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue) -> Result<GpuContext, String> {\n"
+          "        Self::arcano_criar(adapter, device, queue, false)\n"
+          "    }\n\n"
+          "    /// Arcano: [`GpuContext::new`]; `oito` = imagens de trabalho em 8 bits (Rgba8Unorm, modo CapCut).\n"
+          "    pub(crate) fn arcano_criar(adapter: &wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue, oito: bool) -> Result<GpuContext, String> {\n"
+          "        let fmt = if oito { wgpu::TextureFormat::Rgba8Unorm } else { FORMAT };\n"
+          "        let info = adapter.get_info();\n")
+    troca(r, cx, "for f in [FORMAT, wgpu::TextureFormat::Rgba8Unorm]", "for f in [fmt, wgpu::TextureFormat::Rgba8Unorm]")
+    troca(r, cx, "        .concat();\n        let module = init_resource(",
+          "        .concat();\n"
+          "        let src = if oito { src.replace(\"rgba32float\", \"rgba8unorm\") } else { src };\n"
+          "        let module = init_resource(")
+    troca(r, cx, "                    storage_tex_entry(3, FORMAT),\n", "                    storage_tex_entry(3, fmt),\n")
+    troca(r, cx, "                format: FORMAT,\n                usage: wgpu::TextureUsages::TEXTURE_BINDING,\n",
+          "                format: fmt,\n                usage: wgpu::TextureUsages::TEXTURE_BINDING,\n")
+    troca(r, cx, "            deferred: None,\n            readbacks,\n        })", "            deferred: None,\n            readbacks,\n            oito,\n        })")
+    troca(r, cx, "            yuv: std::sync::OnceLock::new(),\n        }\n", "            yuv: std::sync::OnceLock::new(),\n            oito: self.oito,\n        }\n")
+    troca(r, cx, "    readbacks: Arc<crate::readback::Readbacks>,\n}\n",
+          "    readbacks: Arc<crate::readback::Readbacks>,\n"
+          "    /// Arcano: imagens de trabalho em 8 bits (modo CapCut do render).\n"
+          "    pub(crate) oito: bool,\n"
+          "}\n")
+    troca(r, cx, "    t.width() as usize * t.height() as usize * 16\n",
+          "    t.width() as usize * t.height() as usize * t.format().block_copy_size(None).unwrap_or(16) as usize\n")
+    troca(r, cx, "            format: FORMAT,\n            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING",
+          "            format: if self.oito { wgpu::TextureFormat::Rgba8Unorm } else { FORMAT },\n            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING")
+    troca(r, cx, "        self.transfers.count(true, img.data.len() * 16);\n        let g = self.image(img.width, img.height);\n",
+          "        if self.oito {\n"
+          "            self.transfers.count(true, img.data.len() * 4);\n"
+          "            let g = self.image(img.width, img.height);\n"
+          "            let bytes = para_8bits(&img.data);\n"
+          "            self.queue.write_texture(\n"
+          "                wgpu::TexelCopyTextureInfo { texture: &g.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },\n"
+          "                &bytes,\n"
+          "                wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(img.width * 4), rows_per_image: Some(img.height) },\n"
+          "                wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },\n"
+          "            );\n"
+          "            return Some(g);\n"
+          "        }\n"
+          "        self.transfers.count(true, img.data.len() * 16);\n        let g = self.image(img.width, img.height);\n")
+    troca(r, cx, "            let bytes = buf.img.data.len() * 16;\n", "            let bytes = buf.img.data.len() * if self.oito { 4 } else { 16 };\n")
+    troca(r, cx, "    pub fn download(&mut self, img: &GpuImage) -> Option<Image> {\n",
+          "    pub fn download(&mut self, img: &GpuImage) -> Option<Image> {\n"
+          "        if self.g.oito {\n"
+          "            let b = self.read_texture(&img.texture, img.width, img.height, 4)?;\n"
+          "            return Some(Image { width: img.width, height: img.height, data: de_8bits(&b) });\n"
+          "        }\n")
+    troca(r, cx, "    pub fn image_rows(&mut self, img: &GpuImage) -> (wgpu::Buffer, u32) {\n",
+          "    pub fn image_rows(&mut self, img: &GpuImage) -> (wgpu::Buffer, u32) {\n"
+          "        if self.g.oito {\n"
+          "            // 8 bits: os kernels leem as linhas como RGBA f32; lê a imagem e manda em f32\n"
+          "            let px = self.download(img).map(|i| i.data).unwrap_or_else(|| vec![[0.0; 4]; img.width as usize * img.height as usize]);\n"
+          "            return (self.bytes(bytemuck::cast_slice(&px).to_vec()), img.width);\n"
+          "        }\n")
+    cxp = pathlib.Path(r) / cx
+    cxp.write_text(cxp.read_text(encoding="utf-8") + (
+        "\n/// Arcano (modo CapCut): RGBA f32 → RGBA8 (0..1, arredondado).\n"
+        "fn para_8bits(px: &[[f32; 4]]) -> Vec<u8> {\n"
+        "    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;\n"
+        "    px.iter().flat_map(|p| [q(p[0]), q(p[1]), q(p[2]), q(p[3])]).collect()\n"
+        "}\n\n"
+        "/// Arcano (modo CapCut): RGBA8 → RGBA f32.\n"
+        "fn de_8bits(b: &[u8]) -> Vec<[f32; 4]> {\n"
+        "    b.chunks_exact(4).map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, c[3] as f32 / 255.0]).collect()\n"
+        "}\n\n"
+        "#[cfg(not(target_arch = \"wasm32\"))]\n"
+        "impl GpuContext {\n"
+        "    /// Arcano (modo CapCut): conexão própria no adaptador dado, com as imagens em 8 bits.\n"
+        "    pub fn arcano_no_adaptador_8bits(adapter: &wgpu::Adapter) -> Result<GpuContext, String> {\n"
+        "        let limits = adapter.limits();\n"
+        "        let required_limits = wgpu::Limits {\n"
+        "            max_texture_dimension_2d: limits.max_texture_dimension_2d.min(16384),\n"
+        "            max_buffer_size: limits.max_buffer_size,\n"
+        "            ..wgpu::Limits::default()\n"
+        "        };\n"
+        "        let (device, queue) = pollster::block_on(adapter.request_device(&device_descriptor(required_limits))).map_err(|e| format!(\"no device: {e}\"))?;\n"
+        "        let context = GpuContext::arcano_criar(adapter, device, queue, true)?;\n"
+        "        crate::readback::install(&context.device, &context.readbacks);\n"
+        "        Ok(context)\n"
+        "    }\n"
+        "}\n"), encoding="utf-8")
+    lb = pathlib.Path(r) / "crates/gpu/src/lib.rs"
+    lb.write_text(lb.read_text(encoding="utf-8") + (
+        "\n#[cfg(not(target_arch = \"wasm32\"))]\n"
+        "impl Gpu {\n"
+        "    /// Arcano (modo CapCut): compositor em 8 bits numa conexão própria no adaptador dado.\n"
+        "    pub fn arcano_no_adaptador_8bits(adapter: &wgpu::Adapter) -> Result<Gpu, String> {\n"
+        "        GpuContext::arcano_no_adaptador_8bits(adapter).map(Gpu::from_context)\n"
+        "    }\n"
+        "}\n"), encoding="utf-8")
+    a3 = "crates/gpu/src/adv3d.rs"
+    troca(r, a3, "    g.adv3d.get_or_init(|| Pipes::new(&g.device, g.adv3d_raster))\n", "    g.adv3d.get_or_init(|| Pipes::new(&g.device, g.adv3d_raster, g.oito))\n")
+    troca(r, a3, "    fn new(device: &wgpu::Device, raster: bool) -> Pipes {\n", "    fn new(device: &wgpu::Device, raster: bool, oito: bool) -> Pipes {\n")
+    troca(r, a3, "        Pipes { raster, post: Post::new(device) }\n", "        Pipes { raster, post: Post::new(device, oito) }\n")
+    troca(r, a3, "    fn new(device: &wgpu::Device) -> Post {\n", "    fn new(device: &wgpu::Device, oito: bool) -> Post {\n"
+          "        let fmt = if oito { wgpu::TextureFormat::Rgba8Unorm } else { crate::context::FORMAT };\n")
+    troca(r, a3, "            source: wgpu::ShaderSource::Wgsl(include_str!(\"shaders/adv3d.wgsl\").into()),\n",
+          "            source: wgpu::ShaderSource::Wgsl(if oito { include_str!(\"shaders/adv3d.wgsl\").replace(\"rgba32float\", \"rgba8unorm\").into() } else { include_str!(\"shaders/adv3d.wgsl\").into() }),\n")
+    troca(r, a3, "                    format: crate::context::FORMAT,\n", "                    format: fmt,\n")
+    troca(r, a3, "            dummy_out: tex1(crate::context::FORMAT, wgpu::TextureUsages::STORAGE_BINDING),\n", "            dummy_out: tex1(fmt, wgpu::TextureUsages::STORAGE_BINDING),\n")
+
+    # ── o render usa a conexão de 8 bits só no modo CapCut ──
+    rq = "crates/engine/src/render_queue.rs"
+    troca(r, rq, "        accel: s.accel.clone(),\n", "        accel: arcano_accel_render(&s.accel),\n")
+    troca(r, rq, "            accel: self.accel.clone(),\n", "            accel: arcano_accel_render(&self.accel),\n")
+    troca(r, rq, "    let propria = ARCANO_ACCEL_RENDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().filter(|a| a.available());\n",
+          "    // Arcano (13/11/2026): a conexão própria só vale no modo CapCut (o render normal = o original, na da janela)\n"
+          "    if !effectcraft_render::arcano_placa::capcut() {\n"
+          "        return janela.clone();\n"
+          "    }\n"
+          "    let propria = ARCANO_ACCEL_RENDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone().filter(|a| a.available());\n")
+    troca(r, rq, "        log::info!(\"[render] na conexão própria com a placa (separada da janela)\");\n",
+          "        log::info!(\"[render] modo CapCut: placa em 8 bits, conexão própria (separada da janela)\");\n")
+    rr = "crates/ui-egui/src/arcano_render.rs"
+    troca(r, rr, "        Some(a) => effectcraft_gpu::Gpu::arcano_no_adaptador(a),\n        None => effectcraft_gpu::Gpu::try_headless(),\n",
+          "        Some(a) => effectcraft_gpu::Gpu::arcano_no_adaptador_8bits(a),\n        None => Err(\"sem a placa da janela\".into()),\n")
+    troca(r, rr, "            log::info!(\"[render] conexão própria com a placa: {placa} ({} MB de camadas, {} ms)\", bytes >> 20, t.elapsed().as_millis());\n",
+          "            log::info!(\"[render] modo CapCut: conexão própria com a placa em 8 bits: {placa} ({} MB de camadas, {} ms)\", bytes >> 20, t.elapsed().as_millis());\n")
+    troca(r, "crates/ui-egui/src/menus/invoke.rs", "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n",
+          "    let _medida = arcano_guarda::medir(format!(\"comando {id}\"), 300);\n"
+          "    // Arcano: modo CapCut (só admin): a conexão de 8 bits do render, feita antes de começar\n"
+          "    #[cfg(not(target_arch = \"wasm32\"))]\n"
+          "    if id == \"renderQueue.render\" && effectcraft_render::arcano_placa::capcut() && app.session.project.settings.gpu_acceleration && app.session.accel.is_some() {\n"
+          "        crate::arcano_render::gpu_do_render();\n"
+          "    }\n")
+    # NVENC só no modo CapCut; 2 quadros na placa ao mesmo tempo
+    troca(r, "crates/export/src/encode.rs", "        OutputFormat::H264 => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n",
+          "        OutputFormat::H264 => match crate::arcano_placa::abrir(w, h, rate.num, rate.den, job.output.bitrate_kbps) {\n"
+          "            Some(e) => Box::new(H264NaPlaca { enc: e, w, h, y: vec![], u: vec![], v: vec![] }),\n"
+          "            None => Box::new(H264::new(w, h, rate, job.output.bitrate_kbps)?),\n"
+          "        },\n")
+    troca(r, "crates/export/src/arcano_placa.rs", "FABRICA.get().is_some() && effectcraft_render::arcano_placa::ligada() && !FALHOU.load(Ordering::Relaxed)",
+          "FABRICA.get().is_some() && effectcraft_render::arcano_placa::capcut() && !FALHOU.load(Ordering::Relaxed)")
+    troca(r, "crates/export/src/pipeline.rs", "then(|| gpu_inflight(std::env::var(GPU_INFLIGHT_ENV).ok().as_deref()))",
+          "then(|| if effectcraft_render::arcano_placa::capcut() { 2 } else { gpu_inflight(std::env::var(GPU_INFLIGHT_ENV).ok().as_deref()) })")
+    # programa de PC: decodificador do sistema + NVENC registrados (inertes fora do modo CapCut) e conferência de admin
+    troca(r, "apps/effectcraft/src/main.rs", "    let _ = arcano_placa::ligar;\n", "    arcano_placa::ligar();\n")
+    # botão destacado na fila de render
+    copia(pathlib.Path(__file__).parent / "arquivos/ui-arcano-capcut.rs", pathlib.Path(r) / "crates/ui-egui/src/arcano_capcut.rs")
+    troca(r, "crates/ui-egui/src/lib.rs", "pub mod arcano_render;\n", "pub mod arcano_capcut;\npub mod arcano_render;\n")
+    troca(r, "crates/ui-egui/src/panels/render_queue.rs",
+          "    p.text(pos2(x0, top.min.y + 16.0), Align2::LEFT_CENTER, tr(\"Current Render\"), Tokens::semibold(12.5), t.text);\n",
+          "    p.text(pos2(x0, top.min.y + 16.0), Align2::LEFT_CENTER, tr(\"Current Render\"), Tokens::semibold(12.5), t.text);\n"
+          "    crate::arcano_capcut::botao(ui, p, pos2(x0 + 120.0, top.min.y + 5.0), rendering, &t);\n")
+
+
 def desktop(app, raiz):
     """Versão para instalar no PC: ícones do Arcano e nome Arcano Layers também nas partes
     que só existem no programa de computador (janela, diálogos)."""
@@ -2404,6 +2619,7 @@ def desktop(app, raiz):
         guarda_travamento(raiz)
         placa_caiu(raiz)
         programa_leve_pc(raiz)
+        modo_capcut(raiz)
         # Nome gravado no .exe (Gerenciador de Tarefas, barra de tarefas, propriedades do arquivo).
         troca(raiz, "apps/effectcraft/build.rs", '.set("ProductName", "EffectCraft")', f'.set("ProductName", "{NOME} Vídeo")')
         troca(raiz, "apps/effectcraft/build.rs", '.set("FileDescription", "EffectCraft motion graphics and visual effects")', f'.set("FileDescription", "{NOME} Vídeo")')
